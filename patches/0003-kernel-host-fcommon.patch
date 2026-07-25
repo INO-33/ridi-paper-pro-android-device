@@ -1,0 +1,17 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] build: pass fcommon to legacy kernel host tools
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0003-kernel-host-fcommon.patch
+
+diff --git a/build/make/core/Makefile b/build/make/core/Makefile
+--- a/build/make/core/Makefile
++++ b/build/make/core/Makefile
+@@ -1373,5 +1373,5 @@ else
+ endif
+ KERNEL_CFLAGS := KCFLAGS=-mno-android
+-KERNEL_ENV := ARCH=$(TARGET_ARCH) CROSS_COMPILE=$(KERNEL_CROSS_TOOLCHAIN) LOADADDR=$(LOAD_KERNEL_ENTRY) $(KERNEL_CFLAGS)
++KERNEL_ENV := ARCH=$(TARGET_ARCH) CROSS_COMPILE=$(KERNEL_CROSS_TOOLCHAIN) LOADADDR=$(LOAD_KERNEL_ENTRY) HOSTCFLAGS=-fcommon $(KERNEL_CFLAGS)
+ HOST_PROCESSOR := $(shell cat /proc/cpuinfo | grep processor | wc -l)
+ INSTALLED_KERNEL_TARGET := $(KERNEL_OUT)/kernel_img
