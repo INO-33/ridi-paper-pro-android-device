@@ -9,6 +9,9 @@ the framework, ADB, i.MX6 graphics, touch input files and the graphics HIDL
 interfaces. Wi-Fi, Bluetooth, camera, audio, OMX, GMS and consumer apps remain
 disabled until the base userspace reaches `sys.boot_completed`.
 
+See [`FEATURE_PRUNING_PLAN.md`](FEATURE_PRUNING_PLAN.md) for the hardware-based
+package policy and the planned minimal, reader and production product profiles.
+
 The minimal fstab refers only to external SD partitions:
 
 - `mmcblk1p2`: read-only `/system`
