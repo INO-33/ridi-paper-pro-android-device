@@ -1,0 +1,17 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] stagefright: drop unavailable private FSL codec include
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0002-build-without-private-fsl-codec.patch
+
+diff --git a/frameworks/av/media/libstagefright/Android.bp b/frameworks/av/media/libstagefright/Android.bp
+--- a/frameworks/av/media/libstagefright/Android.bp
++++ b/frameworks/av/media/libstagefright/Android.bp
+@@ -72,7 +72,6 @@ cc_library_shared {
+     include_dirs: [
+         "frameworks/native/include/media/openmax",
+         "frameworks/native/include/media/hardware",
+-        "vendor/nxp/fsl-codec/ghdr/common",
+         "vendor/nxp-opensource/imx/include",
+     ],

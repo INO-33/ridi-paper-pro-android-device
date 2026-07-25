@@ -1,0 +1,7 @@
+/dev/graphics/fb0  0660  system  graphics
+/dev/input/event*  0660  system  input
+/dev/galcore       0660  system  graphics
+/dev/pxp_device    0660  system  graphics
+/dev/watchdog      0600  root    root
+
+/sys/class/graphics/fb0/*  0660  system  graphics

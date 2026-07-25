@@ -1,0 +1,23 @@
+on early-init
+    write /proc/sys/kernel/panic 10
+    mount debugfs debugfs /sys/kernel/debug mode=0755
+
+on fs
+    # Only external SD partitions are present in this fstab.
+    mount_all /fstab.E70Q10
+
+on post-fs-data
+    mkdir /data/ridi 0770 system system
+    mkdir /data/ridi/logs 0770 system system
+
+on property:sys.boot_completed=1
+    write /dev/kmsg "E70Q10_ANDROID_BOOT_COMPLETED"
+
+# Set a 30 second hardware timeout and pet it every 10 seconds. If init or
+# userspace wedges badly enough to stop watchdogd, the device returns to the
+# stock boot path instead of remaining inaccessible.
+service watchdogd /sbin/watchdogd 10 20
+    class core
+    user root
+    group root
+    seclabel u:r:watchdogd:s0

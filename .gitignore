@@ -1,0 +1,11 @@
+# Android build output and local editor state
+out/
+.vscode/
+*.log
+
+# Never publish extracted firmware or device-unique data here.
+stock-blobs/
+backups/
+device-dumps/
+*.img
+*.bin

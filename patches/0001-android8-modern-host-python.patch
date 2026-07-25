@@ -1,0 +1,31 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] prebuilts: find Python 2 through PATH on modern hosts
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0001-android8-modern-host-python.patch
+
+diff --git a/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang b/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang
+--- a/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang
++++ b/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang
+@@ -1 +1 @@
+-#!/usr/bin/python
++#!/usr/bin/env python
+diff --git a/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang++ b/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang++
+--- a/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang++
++++ b/prebuilts/clang/host/linux-x86/clang-4053586/bin/clang++
+@@ -1 +1 @@
+-#!/usr/bin/python
++#!/usr/bin/env python
+diff --git a/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-g++ b/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-g++
+--- a/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-g++
++++ b/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-g++
+@@ -1 +1 @@
+-#!/usr/bin/python
++#!/usr/bin/env python
+diff --git a/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-gcc b/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-gcc
+--- a/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-gcc
++++ b/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-gcc
+@@ -1 +1 @@
+-#!/usr/bin/python
++#!/usr/bin/env python
