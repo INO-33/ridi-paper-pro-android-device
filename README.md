@@ -11,6 +11,9 @@ disabled until the base userspace reaches `sys.boot_completed`.
 
 See [`FEATURE_PRUNING_PLAN.md`](FEATURE_PRUNING_PLAN.md) for the hardware-based
 package policy and the planned minimal, reader and production product profiles.
+The updated execution order and YES24/Total Launcher target are documented in
+[`FINAL_PORTING_PLAN.md`](FINAL_PORTING_PLAN.md). The verified NXP graphics
+call path is documented in [`GRAPHICS_EPDC_PATH.md`](GRAPHICS_EPDC_PATH.md).
 
 The minimal fstab refers only to external SD partitions:
 
@@ -34,10 +37,21 @@ allow old kernel host tools to build with a modern GCC.
 patch -p1 < device/ridi/e70q10/patches/0001-android8-modern-host-python.patch
 patch -p1 < device/ridi/e70q10/patches/0002-build-without-private-fsl-codec.patch
 patch -p1 < device/ridi/e70q10/patches/0003-kernel-host-fcommon.patch
+patch -p1 < device/ridi/e70q10/patches/0004-surfaceflinger-fix-hwc1-framebuffer-post.patch
+patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
 device/ridi/e70q10/tools/build_android8.sh check
 device/ridi/e70q10/tools/build_android8.sh build ramdisk
 device/ridi/e70q10/tools/build_android8.sh build bootimage
 device/ridi/e70q10/tools/make_stock_ramboot.sh
+```
+
+The build helper separates output by product. After attaching an ext4 build
+disk, use a clean reference output directory:
+
+```sh
+E70Q10_LUNCH=e70q10_reference-eng \
+E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
+device/ridi/e70q10/tools/build_android8.sh build systemimage vendorimage
 ```
 
 The first verified build produced
@@ -56,8 +70,9 @@ Blocking work before an image can be installed:
 2. The stock waveform, shared ED078KH1/ED078KH3 timing profile, 16-bit EPDC bus
    and PMIC sequence are hardware-verified with white and 16-step GC16 RAM-boot
    refreshes. Finish repeated-update, temperature and suspend/resume validation.
-3. Adapt the NXP Oreo composer/gralloc path for EPDC update ioctls and ghosting
-   policy.  KitKat HAL binaries are not ABI-compatible.
+3. The source-complete HWC1/gralloc-v1 EPDC path now builds. Validate its
+   rate-limited `E70Q10_EPDC` submission/completion telemetry on the device,
+   then implement coalescing, partial regions and ghosting policy.
 4. Measure built images and define a recoverable replacement partition map.
 5. Prove RAM boot, ADB/serial recovery, suspend/resume and power-off before any
    eMMC write.

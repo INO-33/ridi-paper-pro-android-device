@@ -12,6 +12,14 @@ on post-fs-data
 
 on property:sys.boot_completed=1
     write /dev/kmsg "E70Q10_ANDROID_BOOT_COMPLETED"
+    start e70q10_eink_defaults
+
+service e70q10_eink_defaults /system/bin/e70q10-eink-settings
+    class late_start
+    user system
+    group system
+    disabled
+    oneshot
 
 # Set a 30 second hardware timeout and pet it every 10 seconds. If init or
 # userspace wedges badly enough to stop watchdogd, the device returns to the

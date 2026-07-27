@@ -1,0 +1,29 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] surfaceflinger: restore the HWC1 framebuffer-post branch
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0004-surfaceflinger-fix-hwc1-framebuffer-post.patch
+
+diff --git a/frameworks/native/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp b/frameworks/native/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp
+--- a/frameworks/native/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp
++++ b/frameworks/native/services/surfaceflinger/DisplayHardware/FramebufferSurface.cpp
+@@ -176,13 +176,17 @@ status_t FramebufferSurface::nextBuffer(sp<GraphicBuffer>& outBuffer, sp<Fence>&
+ #else
+     outBuffer = mCurrentBuffer;
+ #endif
++#ifdef USE_HWC2
+     status_t result =
+             mHwc.setClientTarget(mDisplayType, outSlot, outFence, outBuffer, outDataspace);
+     if (result != NO_ERROR) {
+         ALOGE("error posting framebuffer: %d", result);
+     }
+-
+     return result;
++#else
++    // HWC1 posts this buffer from onFrameAvailable() through fbPost().
++    return NO_ERROR;
++#endif
+ }
+ 
+ #ifndef USE_HWC2

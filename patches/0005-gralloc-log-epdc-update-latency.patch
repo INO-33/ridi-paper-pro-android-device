@@ -1,0 +1,82 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] gralloc: add rate-limited E70Q10 EPDC update telemetry
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
+
+diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
+--- a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
++++ b/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
+@@ -30,6 +30,7 @@
+ #include <sys/ioctl.h>
+ #include <string.h>
+ #include <stdlib.h>
++#include <time.h>
+ 
+ #include <cutils/log.h>
+ #include <cutils/atomic.h>
+@@ -87,14 +88,28 @@ static bool isEPDCDisplay()
+ }
+ 
+ __u32 marker_val = 1;
++static unsigned long epdc_update_count;
++
++static long elapsed_ms(const struct timespec& start, const struct timespec& end)
++{
++	return (end.tv_sec - start.tv_sec) * 1000L
++		+ (end.tv_nsec - start.tv_nsec) / 1000000L;
++}
++
+ static __u32 update_to_display(private_module_t* m, int left, int top, int width, int height,
+         int wave_mode, int wait_for_complete, uint flags)
+ {
+ 	struct mxcfb_update_data upd_data;
+ 	struct mxcfb_update_marker_data upd_marker_data;
++	struct timespec start_time;
++	struct timespec end_time;
+ 	int retval;
++	int retries = 0;
+ 	int wait = wait_for_complete | (flags & EPDC_FLAG_TEST_COLLISION);
+ 	int max_retry = EPDC_WAITCOUNT;
++	unsigned long sequence = ++epdc_update_count;
++
++	clock_gettime(CLOCK_MONOTONIC, &start_time);
+ 
+ 	upd_data.update_mode = UPDATE_MODE_PARTIAL;
+ 	upd_data.waveform_mode = wave_mode;
+@@ -117,8 +132,10 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
+ 		 * then try again after some updates have completed */
+ 		usleep(EPDC_WAITTIME_MS);
+ 		retval = ioctl(m->framebuffer->fd, MXCFB_SEND_UPDATE, &upd_data);
++		retries++;
+ 		if (--max_retry <= 0) {
+-			ALOGE("Max retries exceeded\n");
++			ALOGE("E70Q10_EPDC submit failed seq=%lu marker=%u errno=%d",
++				sequence, upd_data.update_marker, errno);
+ 			wait = 0;
+ 			flags = 0;
+ 			break;
+@@ -132,11 +149,21 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
+ 		//retval = ioctl(fd_fb_ioctl, MXCFB_WAIT_FOR_UPDATE_COMPLETE, &upd_marker_data);
+ 		retval = ioctl(m->framebuffer->fd, MXCFB_WAIT_FOR_UPDATE_COMPLETE, &upd_marker_data);
+ 		if (retval < 0) {
+-			ALOGE("Wait for update complete failed.  Error = 0x%x", retval);
++			ALOGE("E70Q10_EPDC wait failed seq=%lu marker=%u errno=%d",
++				sequence, upd_data.update_marker, errno);
+ 			flags = 0;
+ 		}
+ 	}
+ 
++	clock_gettime(CLOCK_MONOTONIC, &end_time);
++	if (sequence <= 8 || (sequence % 120) == 0 || retval < 0 || retries > 0) {
++		ALOGI("E70Q10_EPDC seq=%lu marker=%u region=%d,%d %dx%d wave=%d "
++			"wait=%d retries=%d result=%d latency_ms=%ld",
++			sequence, upd_data.update_marker, left, top, width, height,
++			wave_mode, wait, retries, retval,
++			elapsed_ms(start_time, end_time));
++	}
++
+ 	if (flags & EPDC_FLAG_TEST_COLLISION) {
+ 		ALOGE("Collision test result = %d\n",
+ 			upd_marker_data.collision_test);
