@@ -14,6 +14,8 @@ package policy and the planned minimal, reader and production product profiles.
 The updated execution order and YES24/Total Launcher target are documented in
 [`FINAL_PORTING_PLAN.md`](FINAL_PORTING_PLAN.md). The verified NXP graphics
 call path is documented in [`GRAPHICS_EPDC_PATH.md`](GRAPHICS_EPDC_PATH.md).
+The first complete reference image hashes and sizes are recorded in
+[`BUILD_RESULTS.md`](BUILD_RESULTS.md).
 
 The minimal fstab refers only to external SD partitions:
 
@@ -39,6 +41,7 @@ patch -p1 < device/ridi/e70q10/patches/0002-build-without-private-fsl-codec.patc
 patch -p1 < device/ridi/e70q10/patches/0003-kernel-host-fcommon.patch
 patch -p1 < device/ridi/e70q10/patches/0004-surfaceflinger-fix-hwc1-framebuffer-post.patch
 patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
+patch -p1 < device/ridi/e70q10/patches/0006-documentsui-fix-usb-shortcut-color.patch
 device/ridi/e70q10/tools/build_android8.sh check
 device/ridi/e70q10/tools/build_android8.sh build ramdisk
 device/ridi/e70q10/tools/build_android8.sh build bootimage

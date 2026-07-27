@@ -1,5 +1,5 @@
 From: RIDI Paper Pro Android 8 bring-up
-Subject: [PATCH] stagefright: drop unavailable private FSL codec include
+Subject: [PATCH] stagefright: drop unavailable private FSL extractor
 
 Apply from the Android source root:
 
@@ -8,10 +8,115 @@ Apply from the Android source root:
 diff --git a/frameworks/av/media/libstagefright/Android.bp b/frameworks/av/media/libstagefright/Android.bp
 --- a/frameworks/av/media/libstagefright/Android.bp
 +++ b/frameworks/av/media/libstagefright/Android.bp
-@@ -72,7 +72,6 @@ cc_library_shared {
+@@ -27,8 +27,6 @@ cc_library_shared {
+         "FileSource.cpp",
+         "FLACExtractor.cpp",
+         "FrameRenderTracker.cpp",
+-        "FslInspector.cpp",
+-        "FslExtractor.cpp",
+         "HTTPBase.cpp",
+         "HevcUtils.cpp",
+         "JPEGSource.cpp",
+@@ -72,7 +70,6 @@ cc_library_shared {
      include_dirs: [
          "frameworks/native/include/media/openmax",
          "frameworks/native/include/media/hardware",
 -        "vendor/nxp/fsl-codec/ghdr/common",
          "vendor/nxp-opensource/imx/include",
      ],
+ 
+diff --git a/frameworks/av/media/libstagefright/MediaExtractor.cpp b/frameworks/av/media/libstagefright/MediaExtractor.cpp
+--- a/frameworks/av/media/libstagefright/MediaExtractor.cpp
++++ b/frameworks/av/media/libstagefright/MediaExtractor.cpp
+@@ -48,8 +48,6 @@
+ #include <utils/String8.h>
+ #include <private/android_filesystem_config.h>
+ 
+-#include "include/FslInspector.h"
+-#include "include/FslExtractor.h"
+ // still doing some on/off toggling here.
+ #define MEDIA_LOG       1
+ 
+@@ -170,68 +168,32 @@ sp<MediaExtractor> MediaExtractor::CreateFromService(
+              mime, confidence);
+     }
+ 
+-    bool use_fsl = false;
+-    int value;
+     MediaExtractor *ret = NULL;
+-    value = property_get_int32("media.fsl_codec.flag", 0);
+-    if(value & 0x01)
+-        use_fsl = true;
+ 
+     if (!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_MPEG4)
+             || !strcasecmp(mime, "audio/mp4")) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new MPEG4Extractor(source);
++        ret = new MPEG4Extractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_MPEG)) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new MP3Extractor(source, meta);
++        ret = new MP3Extractor(source, meta);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AMR_NB)
+             || !strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AMR_WB)) {
+         ret = new AMRExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_FLAC)) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new FLACExtractor(source);
++        ret = new FLACExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_WAV)) {
+         ret = new WAVExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_OGG)) {
+         ret = new OggExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_MATROSKA)) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new MatroskaExtractor(source);
++        ret = new MatroskaExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_MPEG2TS)) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new MPEG2TSExtractor(source);
++        ret = new MPEG2TSExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AAC_ADTS)) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new AACExtractor(source, meta);
++        ret = new AACExtractor(source, meta);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_MPEG2PS)) {
+-        if(use_fsl)
+-            ret = new FslExtractor(source,mime);
+-        else
+-            ret = new MPEG2PSExtractor(source);
++        ret = new MPEG2PSExtractor(source);
+     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_MIDI)) {
+         ret = new MidiExtractor(source);
+-    } else if(!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_AVI)){
+-        ret = new FslExtractor(source,mime);
+-    } else if(!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_FLV)){
+-        ret = new FslExtractor(source,mime);
+-    } else if(!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_ASF)){
+-        ret = new FslExtractor(source,mime);
+-    } else if(!strcasecmp(mime, MEDIA_MIMETYPE_CONTAINER_RMVB)){
+-        ret = new FslExtractor(source,mime);
+-    } else if(!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_APE)) {
+-        ret = new FslExtractor(source,mime);
+     }
+ 
+     if (ret != NULL) {
+@@ -326,7 +288,6 @@ void MediaExtractor::RegisterDefaultSniffers() {
+     RegisterSniffer_l(SniffAAC);
+     RegisterSniffer_l(SniffMPEG2PS);
+     RegisterSniffer_l(SniffMidi);
+-    RegisterSniffer_l(SniffFSL);
+     gSniffersRegistered = true;
+ }

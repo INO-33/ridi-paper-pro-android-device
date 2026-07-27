@@ -207,9 +207,9 @@ Initial targets, subject to measurement:
 
 ## PC build-storage policy
 
-Current measurements show 4.7 GiB in the existing Android output directory and
-only about 27 GiB free on the internal filesystem. This is enough for targeted
-module/configuration checks, but not a safe margin for a full reference build.
+The clean external reference build completed with approximately 45 GiB in its
+output directory. The 223 GiB ext4 build partition retained approximately
+167 GiB free. The Android source remains on the internal filesystem.
 
 Before building reference `systemimage` and `vendorimage`, attach the 512 GB
 storage as ext4 with at least 100 GiB free, preferably 150 GiB. Give the
@@ -225,10 +225,12 @@ needs Unix permissions, symlinks and reliable case-sensitive behaviour.
 3. **Done at module level:** build the source-complete NXP
    gralloc-v1/HWC1/SurfaceFlinger path.
 4. **Next:** instrument gralloc framebuffer post and EPDC update completion.
-5. Build and statically validate reference ramdisk/boot components.
-6. Attach external build storage.
-7. Build reference system/vendor images in a clean external `OUT_DIR`.
-8. Prepare SD ext4 partitions and perform non-destructive Android boot.
+5. **Done:** build and statically validate reference ramdisk/boot components.
+6. **Done:** attach external ext4 build storage.
+7. **Done:** build reference system/vendor images in a clean external
+   `OUT_DIR`; see `BUILD_RESULTS.md`.
+8. **Next:** prepare the separate reader work SD ext4 partitions and perform
+   non-destructive Android boot.
 9. Integrate YES24 and Total Launcher after the baseline is stable.
 
 Current targeted-build artifacts confirm that `gralloc.imx6.so`,

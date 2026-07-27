@@ -32,7 +32,9 @@ endif
 # RAM/SD bring-up images. These values do not describe the stock eMMC layout.
 BOARD_BOOTIMAGE_PARTITION_SIZE := 33554432
 BOARD_SYSTEMIMAGE_PARTITION_SIZE := 805306368
-BOARD_VENDORIMAGE_PARTITION_SIZE := 134217728
+# Avoid the legacy make_ext4fs one-block-group boundary at exactly 128 MiB.
+# This is an SD bring-up image; sparse output does not consume the empty size.
+BOARD_VENDORIMAGE_PARTITION_SIZE := 268435456
 BOARD_CACHEIMAGE_PARTITION_SIZE := 67108864
 BOARD_USERDATAIMAGE_PARTITION_SIZE := 2147483648
 BOARD_VENDORIMAGE_FILE_SYSTEM_TYPE := ext4
