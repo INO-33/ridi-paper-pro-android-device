@@ -20,14 +20,17 @@ export PATH="$tool_bin:$JAVA_HOME/bin:$PATH"
 export LD_LIBRARY_PATH="$JAVA_HOME/lib/amd64/jli${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export HOSTCFLAGS=-fcommon
 export LC_ALL=C
-export OUT_DIR="${E70Q10_OUT_DIR:-$workspace/android-out/e70q10}"
 export USE_CCACHE=0
+
+lunch_target="${E70Q10_LUNCH:-e70q10_minimal-eng}"
+product_name="${lunch_target%-*}"
+export OUT_DIR="${E70Q10_OUT_DIR:-$workspace/android-out/$product_name}"
 
 cd "$source_tree"
 set +u
 # shellcheck disable=SC1091
 source build/envsetup.sh >/dev/null
-lunch "${E70Q10_LUNCH:-e70q10_minimal-eng}" >/dev/null
+lunch "$lunch_target" >/dev/null
 set -u
 
 case "${1:-check}" in
@@ -43,7 +46,12 @@ case "${1:-check}" in
         shift
         jobs="${E70Q10_BUILD_JOBS:-6}"
         min_free_gb="${E70Q10_MIN_FREE_GB:-25}"
-        free_kb="$(df -Pk "$workspace" | awk 'NR == 2 {print $4}')"
+        out_parent="$(dirname "$OUT_DIR")"
+        if [[ ! -d "$out_parent" ]]; then
+            echo "Missing OUT_DIR parent: $out_parent" >&2
+            exit 1
+        fi
+        free_kb="$(df -Pk "$out_parent" | awk 'NR == 2 {print $4}')"
         min_free_kb="$((min_free_gb * 1024 * 1024))"
         if (( free_kb < min_free_kb )); then
             echo "Refusing build: ${free_kb} KiB free; ${min_free_kb} KiB required" >&2

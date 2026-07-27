@@ -11,6 +11,15 @@ PRODUCT_MODEL := RIDI_PAPER_PRO
 TARGET_KERNEL_DEFCONF := e70q10_defconfig
 TARGET_BOARD_DTS_CONFIG := imx6sl:imx6sl-e70q10.dtb
 
+# The public NXP HWC2 path requires unavailable proprietary g2dExt/libg2d
+# components. Oreo still provides its direct HWC1 SurfaceFlinger path, and the
+# NXP v1 gralloc already contains the EPDC update implementation.
+TARGET_GRALLOC_VERSION := v1
+TARGET_USES_HWC2 := false
+TARGET_HWCOMPOSER_VERSION := v1.0
+TARGET_HAVE_VIV_HWCOMPOSER := false
+PREBUILT_FSL_IMX_GPU := false
+
 BOARD_KERNEL_CMDLINE := console=ttymxc0,115200 init=/init \
     androidboot.console=ttymxc0 consoleblank=0 no_console_suspend \
     androidboot.hardware=E70Q10 video=mxcepdcfb:ED078KH1,bpp=16 mem=1018M \

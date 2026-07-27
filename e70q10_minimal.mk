@@ -14,16 +14,13 @@ PRODUCT_CHARACTERISTICS := tablet
 PRODUCT_AAPT_CONFIG := normal xhdpi
 PRODUCT_AAPT_PREF_CONFIG := xhdpi
 
+$(call inherit-product, device/ridi/e70q10/e70q10_eink_defaults.mk)
+
 PRODUCT_PACKAGES += \
     gralloc.imx6 \
-    copybit.imx6 \
     hwcomposer.imx6 \
-    libGAL \
-    libg2d \
-    libgpuhelper \
     libion \
     vndk-sp \
-    android.hardware.graphics.composer@2.1-impl \
     android.hardware.graphics.mapper@2.0-impl \
     android.hardware.graphics.allocator@2.0-impl \
     android.hardware.graphics.allocator@2.0-service
