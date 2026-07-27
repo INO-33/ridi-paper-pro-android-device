@@ -21,6 +21,8 @@ export LD_LIBRARY_PATH="$JAVA_HOME/lib/amd64/jli${LD_LIBRARY_PATH:+:$LD_LIBRARY_
 export HOSTCFLAGS=-fcommon
 export LC_ALL=C
 export USE_CCACHE=0
+jack_security="$source_tree/device/ridi/e70q10/tools/jack-java.security"
+export ANDROID_JACK_VM_ARGS="${ANDROID_JACK_VM_ARGS:--Dfile.encoding=UTF-8 -XX:+TieredCompilation -Djava.security.properties=$jack_security}"
 
 lunch_target="${E70Q10_LUNCH:-e70q10_minimal-eng}"
 product_name="${lunch_target%-*}"

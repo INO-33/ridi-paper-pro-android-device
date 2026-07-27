@@ -1,0 +1,5 @@
+# Android 8 Jack uses a legacy local TLS stack that current OpenJDK 8
+# disables by default. Jack binds to localhost and requires its generated
+# client certificate, so relax only the algorithms needed by that local tool.
+jdk.tls.disabledAlgorithms=SSLv3, RC4, DES, MD5withRSA
+jdk.certpath.disabledAlgorithms=MD2, MD5
