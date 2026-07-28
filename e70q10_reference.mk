@@ -4,7 +4,7 @@
 -include device/fsl/common/imx_path/ImxPathConfig.mk
 include device/ridi/e70q10/graphics_backend.mk
 
-$(call inherit-product, $(SRC_TARGET_DIR)/product/generic_no_telephony.mk)
+$(call inherit-product, device/ridi/e70q10/e70q10_reader_base.mk)
 
 PRODUCT_NAME := e70q10_reference
 PRODUCT_DEVICE := e70q10

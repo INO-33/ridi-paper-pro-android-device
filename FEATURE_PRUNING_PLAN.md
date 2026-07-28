@@ -17,8 +17,9 @@ goal. However, the NXP Oreo BSP and SurfaceFlinger still require a minimal
 HIDL/VNDK foundation. Do not remove that foundation merely to reduce image
 size.
 
-The current `e70q10_minimal-eng` product is the first-stage bring-up profile.
-It already omits Wi-Fi, Bluetooth, camera, audio, OMX, GMS and consumer apps.
+The reference product now inherits the E70Q10 positive reader allowlist rather
+than `generic_no_telephony`. The latter still imported phone, Bluetooth, NFC,
+printing, calendar, contacts, mail, music and decorative applications.
 
 ## Hardware-backed functions to retain
 
@@ -145,7 +146,7 @@ The following classification is based on the extracted stock filesystem.
 - YES24 and Total Launcher only after the reference system boots reliably
 - Korean input method
 - Settings and SettingsProvider
-- SystemUI and Keyguard
+- SystemUI and disabled-by-policy Keyguard framework support
 - InputDevices
 - DownloadProvider
 - DocumentsUI
@@ -154,17 +155,19 @@ The following classification is based on the extracted stock filesystem.
 - PackageInstaller
 - CertInstaller
 - Shell in engineering builds only
+- Launcher2 as a recovery HOME until Total Launcher is packaged in `/system`
+- WebView for YES24 login/store flows
+- proxy and captive-portal components until Wi-Fi authentication is validated
 
 ### Removal candidates
 
-- Bluetooth
-- ContactsProvider
-- FusedLocation
-- SharedStorageBackup
-- BackupRestoreConfirmation
+- Bluetooth, NFC, telephony, Telecom and MMS
+- contacts, calendar, email and standalone Browser
+- camera, gallery, music, MusicFX and TTS
+- printing, dreams, wallpapers and Easter egg
+- FusedLocation and ManagedProvisioning
 - PacProcessor when proxy support is not required
 - ProxyHandler when proxy support is not required
-- Browser after WebView use is ruled out
 - Suconfig in production
 - DefaultContainerService after the Oreo package-install path is verified
 

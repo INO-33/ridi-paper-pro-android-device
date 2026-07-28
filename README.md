@@ -83,6 +83,12 @@ Graphics backend selection, the AGL/GLES1 recovery path, and the isolated
 Mesa softpipe benchmark procedure are documented in
 [`GRAPHICS_BRINGUP.md`](GRAPHICS_BRINGUP.md).
 
+The reference product uses the positive package allowlist in
+`e70q10_reader_base.mk`. It deliberately avoids `generic_no_telephony`, which
+still pulls phone, Bluetooth, NFC, printing, PIM, music and decoration apps
+into an AOSP Oreo image. Launcher2 remains only as a recovery HOME until Total
+Launcher is packaged as a system application.
+
 Current validation work:
 
 1. Build and deploy the static E Ink framework policy: no starting windows,
