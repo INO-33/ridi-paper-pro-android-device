@@ -1,0 +1,360 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] mesa: repair Android softpipe EGL path
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0008-mesa-android-softpipe.patch
+
+diff --git a/external/mesa3d/src/egl/Android.mk b/external/mesa3d/src/egl/Android.mk
+index a33ca67..283e02a 100644
+--- a/external/mesa3d/src/egl/Android.mk
++++ b/external/mesa3d/src/egl/Android.mk
+@@ -41,13 +41,15 @@ LOCAL_SRC_FILES := \
+ LOCAL_CFLAGS := \
+ 	-D_EGL_NATIVE_PLATFORM=_EGL_PLATFORM_ANDROID \
+ 	-D_EGL_BUILT_IN_DRIVER_DRI2 \
+-	-DHAVE_ANDROID_PLATFORM
++	-DHAVE_ANDROID_PLATFORM \
++	-DHAVE_LIBDRM
+ 
+ LOCAL_C_INCLUDES := \
+ 	$(MESA_TOP)/src/egl/main \
+ 	$(MESA_TOP)/src/egl/drivers/dri2 \
+ 
+ LOCAL_STATIC_LIBRARIES := \
++	libdrm \
+ 	libmesa_loader
+ 
+ LOCAL_SHARED_LIBRARIES := \
+@@ -55,6 +57,7 @@ LOCAL_SHARED_LIBRARIES := \
+ 	libhardware \
+ 	liblog \
+ 	libcutils \
++	libnativewindow \
+ 	libsync
+ 
+ ifeq ($(strip $(MESA_BUILD_CLASSIC)),true)
+diff --git a/external/mesa3d/src/egl/drivers/dri2/platform_android.c b/external/mesa3d/src/egl/drivers/dri2/platform_android.c
+index ef77ce7..fe14f97 100644
+--- a/external/mesa3d/src/egl/drivers/dri2/platform_android.c
++++ b/external/mesa3d/src/egl/drivers/dri2/platform_android.c
+@@ -32,6 +32,7 @@
+ #include <fcntl.h>
+ #include <xf86drm.h>
+ #include <stdbool.h>
++#include <string.h>
+ #include <sync/sync.h>
+ 
+ #include "loader.h"
+@@ -195,6 +196,217 @@ droid_window_dequeue_buffer(struct dri2_egl_surface *dri2_surf)
+    return EGL_TRUE;
+ }
+ 
++static int
++droid_swrast_bytes_per_pixel(int format)
++{
++   switch (format) {
++   case HAL_PIXEL_FORMAT_RGBA_8888:
++   case HAL_PIXEL_FORMAT_RGBX_8888:
++   case HAL_PIXEL_FORMAT_BGRA_8888:
++      return 4;
++   case HAL_PIXEL_FORMAT_RGB_888:
++      return 3;
++   case HAL_PIXEL_FORMAT_RGB_565:
++      return 2;
++   default:
++      return 0;
++   }
++}
++
++static void
++droid_swrast_get_drawable_info(__DRIdrawable *drawable,
++                               int *x, int *y, int *width, int *height,
++                               void *loader_private)
++{
++   struct dri2_egl_surface *dri2_surf = loader_private;
++   (void) drawable;
++
++   *x = 0;
++   *y = 0;
++   *width = dri2_surf->base.Width;
++   *height = dri2_surf->base.Height;
++
++   if (dri2_surf->window) {
++      dri2_surf->window->query(dri2_surf->window, NATIVE_WINDOW_WIDTH, width);
++      dri2_surf->window->query(dri2_surf->window, NATIVE_WINDOW_HEIGHT, height);
++   }
++}
++
++static void
++droid_swrast_put_image_common(int x, int y, int width, int height,
++                              int src_stride, char *data,
++                              void *loader_private)
++{
++   struct dri2_egl_surface *dri2_surf = loader_private;
++   struct dri2_egl_display *dri2_dpy =
++      dri2_egl_display(dri2_surf->base.Resource.Display);
++   struct ANativeWindowBuffer *buffer;
++   void *vaddr = NULL;
++   int bpp;
++   int dst_stride;
++   int row;
++
++   /* Pbuffers remain entirely inside softpipe. */
++   if (!dri2_surf->window)
++      return;
++
++   if (!dri2_surf->buffer && !droid_window_dequeue_buffer(dri2_surf)) {
++      _eglLog(_EGL_WARNING, "swrast: failed to dequeue native buffer");
++      return;
++   }
++
++   buffer = dri2_surf->buffer;
++   bpp = droid_swrast_bytes_per_pixel(buffer->format);
++   if (!bpp) {
++      _eglLog(_EGL_WARNING, "swrast: unsupported native format 0x%x",
++              buffer->format);
++      return;
++   }
++
++   if (x < 0) {
++      width += x;
++      data -= x * bpp;
++      x = 0;
++   }
++   if (y < 0) {
++      height += y;
++      data -= y * src_stride;
++      y = 0;
++   }
++   if (x + width > buffer->width)
++      width = buffer->width - x;
++   if (y + height > buffer->height)
++      height = buffer->height - y;
++   if (width <= 0 || height <= 0)
++      return;
++
++   if (dri2_dpy->gralloc->lock(dri2_dpy->gralloc, buffer->handle,
++                               GRALLOC_USAGE_SW_WRITE_OFTEN,
++                               x, y, width, height, &vaddr)) {
++      _eglLog(_EGL_WARNING, "swrast: failed to lock native buffer");
++      return;
++   }
++
++   dst_stride = buffer->stride * bpp;
++   for (row = 0; row < height; ++row) {
++      memcpy((char *)vaddr + (y + row) * dst_stride + x * bpp,
++             data + row * src_stride, width * bpp);
++   }
++
++   dri2_dpy->gralloc->unlock(dri2_dpy->gralloc, buffer->handle);
++}
++
++static void
++droid_swrast_put_image(__DRIdrawable *drawable, int op,
++                       int x, int y, int width, int height,
++                       char *data, void *loader_private)
++{
++   struct dri2_egl_surface *dri2_surf = loader_private;
++   int format = HAL_PIXEL_FORMAT_RGBA_8888;
++   if (dri2_surf->window)
++      dri2_surf->window->query(dri2_surf->window, NATIVE_WINDOW_FORMAT,
++                               &format);
++   int bpp = droid_swrast_bytes_per_pixel(format);
++   (void) drawable;
++   (void) op;
++
++   if (bpp)
++      droid_swrast_put_image_common(x, y, width, height, width * bpp,
++                                    data, loader_private);
++}
++
++static void
++droid_swrast_put_image2(__DRIdrawable *drawable, int op,
++                        int x, int y, int width, int height, int stride,
++                        char *data, void *loader_private)
++{
++   (void) drawable;
++   (void) op;
++   droid_swrast_put_image_common(x, y, width, height, stride,
++                                 data, loader_private);
++}
++
++static void
++droid_swrast_get_image_common(int x, int y, int width, int height,
++                              int dst_stride, char *data,
++                              void *loader_private)
++{
++   struct dri2_egl_surface *dri2_surf = loader_private;
++   struct dri2_egl_display *dri2_dpy =
++      dri2_egl_display(dri2_surf->base.Resource.Display);
++   struct ANativeWindowBuffer *buffer = dri2_surf->buffer;
++   void *vaddr = NULL;
++   int bpp;
++   int src_stride;
++   int row;
++
++   if (!buffer) {
++      for (row = 0; row < height; ++row)
++         memset(data + row * dst_stride, 0, dst_stride);
++      return;
++   }
++
++   bpp = droid_swrast_bytes_per_pixel(buffer->format);
++   if (!bpp ||
++       dri2_dpy->gralloc->lock(dri2_dpy->gralloc, buffer->handle,
++                               GRALLOC_USAGE_SW_READ_OFTEN,
++                               x, y, width, height, &vaddr)) {
++      for (row = 0; row < height; ++row)
++         memset(data + row * dst_stride, 0, dst_stride);
++      return;
++   }
++
++   src_stride = buffer->stride * bpp;
++   for (row = 0; row < height; ++row) {
++      memcpy(data + row * dst_stride,
++             (char *)vaddr + (y + row) * src_stride + x * bpp,
++             width * bpp);
++   }
++   dri2_dpy->gralloc->unlock(dri2_dpy->gralloc, buffer->handle);
++}
++
++static void
++droid_swrast_get_image(__DRIdrawable *drawable,
++                       int x, int y, int width, int height,
++                       char *data, void *loader_private)
++{
++   struct dri2_egl_surface *dri2_surf = loader_private;
++   int format = HAL_PIXEL_FORMAT_RGBA_8888;
++   if (dri2_surf->window)
++      dri2_surf->window->query(dri2_surf->window, NATIVE_WINDOW_FORMAT,
++                               &format);
++   int bpp = droid_swrast_bytes_per_pixel(format);
++   (void) drawable;
++
++   if (bpp)
++      droid_swrast_get_image_common(x, y, width, height, width * bpp,
++                                    data, loader_private);
++}
++
++static void
++droid_swrast_get_image2(__DRIdrawable *drawable,
++                        int x, int y, int width, int height, int stride,
++                        char *data, void *loader_private)
++{
++   (void) drawable;
++   droid_swrast_get_image_common(x, y, width, height, stride,
++                                 data, loader_private);
++}
++
++static const __DRIswrastLoaderExtension droid_swrast_loader_extension = {
++   .base = { __DRI_SWRAST_LOADER, 3 },
++   .getDrawableInfo = droid_swrast_get_drawable_info,
++   .putImage = droid_swrast_put_image,
++   .getImage = droid_swrast_get_image,
++   .putImage2 = droid_swrast_put_image2,
++   .getImage2 = droid_swrast_get_image2,
++};
++
++static const __DRIextension *droid_swrast_loader_extensions[] = {
++   &droid_swrast_loader_extension.base,
++   NULL,
++};
++
+ static EGLBoolean
+ droid_window_enqueue_buffer(_EGLDisplay *disp, struct dri2_egl_surface *dri2_surf)
+ {
+@@ -323,9 +535,15 @@ droid_create_surface(_EGLDriver *drv, _EGLDisplay *disp, EGLint type,
+    if (!config)
+       goto cleanup_surface;
+ 
+-   dri2_surf->dri_drawable =
+-      dri2_dpy->dri2->createNewDrawable(dri2_dpy->dri_screen, config,
+-                                        dri2_surf);
++   if (dri2_dpy->swrast) {
++      dri2_surf->dri_drawable =
++         dri2_dpy->swrast->createNewDrawable(dri2_dpy->dri_screen, config,
++                                             dri2_surf);
++   } else {
++      dri2_surf->dri_drawable =
++         dri2_dpy->dri2->createNewDrawable(dri2_dpy->dri_screen, config,
++                                           dri2_surf);
++   }
+    if (dri2_surf->dri_drawable == NULL) {
+       _eglError(EGL_BAD_ALLOC, "dri2->createNewDrawable");
+       goto cleanup_surface;
+@@ -376,13 +594,13 @@ droid_destroy_surface(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *surf)
+       dri2_surf->window->common.decRef(&dri2_surf->window->common);
+    }
+ 
+-   if (dri2_surf->dri_image_back) {
++   if (dri2_dpy->image && dri2_surf->dri_image_back) {
+       _eglLog(_EGL_DEBUG, "%s : %d : destroy dri_image_back", __func__, __LINE__);
+       dri2_dpy->image->destroyImage(dri2_surf->dri_image_back);
+       dri2_surf->dri_image_back = NULL;
+    }
+ 
+-   if (dri2_surf->dri_image_front) {
++   if (dri2_dpy->image && dri2_surf->dri_image_front) {
+       _eglLog(_EGL_DEBUG, "%s : %d : destroy dri_image_front", __func__, __LINE__);
+       dri2_dpy->image->destroyImage(dri2_surf->dri_image_front);
+       dri2_surf->dri_image_front = NULL;
+@@ -578,7 +796,8 @@ droid_swap_buffers(_EGLDriver *drv, _EGLDisplay *disp, _EGLSurface *draw)
+    if (dri2_surf->buffer)
+       droid_window_enqueue_buffer(disp, dri2_surf);
+ 
+-   dri2_dpy->flush->invalidate(dri2_surf->dri_drawable);
++   if (dri2_dpy->flush)
++      dri2_dpy->flush->invalidate(dri2_surf->dri_drawable);
+ 
+    return EGL_TRUE;
+ }
+@@ -1140,18 +1359,28 @@ dri2_initialize_android(_EGLDriver *drv, _EGLDisplay *dpy)
+          goto cleanup_driver_name;
+       }
+    } else if (droid_probe_device(dpy) < 0) {
+-      err = "DRI2: failed to open device";
+-      goto cleanup_display;
++      /* i.MX6SoloLite has neither a GPU render node nor a DRM-aware
++       * gralloc. Gallium softpipe only needs CPU-accessible native buffers. */
++      dri2_dpy->fd = -1;
++      dri2_dpy->driver_name = strdup("swrast");
++      if (!dri2_dpy->driver_name || !dri2_load_driver_swrast(dpy)) {
++         err = "DRI2: failed to load Android swrast driver";
++         goto cleanup_driver_name;
++      }
++      dri2_dpy->loader_extensions = droid_swrast_loader_extensions;
+    }
+ 
+-   dri2_dpy->is_render_node = drmGetNodeTypeFromFd(dri2_dpy->fd) == DRM_NODE_RENDER;
++   if (!dri2_dpy->swrast) {
++      dri2_dpy->is_render_node =
++         drmGetNodeTypeFromFd(dri2_dpy->fd) == DRM_NODE_RENDER;
+ 
+-   /* render nodes cannot use Gem names, and thus do not support
+-    * the __DRI_DRI2_LOADER extension */
+-   if (!dri2_dpy->is_render_node)
+-      dri2_dpy->loader_extensions = droid_dri2_loader_extensions;
+-   else
+-      dri2_dpy->loader_extensions = droid_image_loader_extensions;
++      /* render nodes cannot use Gem names, and thus do not support
++       * the __DRI_DRI2_LOADER extension */
++      if (!dri2_dpy->is_render_node)
++         dri2_dpy->loader_extensions = droid_dri2_loader_extensions;
++      else
++         dri2_dpy->loader_extensions = droid_image_loader_extensions;
++   }
+ 
+    if (!dri2_create_screen(dpy)) {
+       err = "DRI2: failed to create screen";
+@@ -1181,7 +1410,8 @@ cleanup_driver:
+ cleanup_driver_name:
+    free(dri2_dpy->driver_name);
+ cleanup_device:
+-   close(dri2_dpy->fd);
++   if (dri2_dpy->fd >= 0)
++      close(dri2_dpy->fd);
+ cleanup_display:
+    free(dri2_dpy);
+    dpy->DriverData = NULL;
+

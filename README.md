@@ -1,7 +1,9 @@
 # E70Q10 Android product status
 
 This tree defines a dedicated NXP i.MX6SL product and selects the reconstructed
-E70Q10 DTB. It is a bring-up skeleton, not a flashable product.
+E70Q10 DTB. Android 8 reaches `sys.boot_completed=1` using RAM boot and the
+external-SD system/vendor/data partitions. It remains a recovery-oriented
+bring-up tree, not an eMMC-flashing procedure.
 
 For the first SD/RAM boot, use `e70q10_minimal-eng`. It starts from Android's
 `core_minimal` product instead of the full NXP EVK product and includes only
@@ -42,9 +44,13 @@ patch -p1 < device/ridi/e70q10/patches/0003-kernel-host-fcommon.patch
 patch -p1 < device/ridi/e70q10/patches/0004-surfaceflinger-fix-hwc1-framebuffer-post.patch
 patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
 patch -p1 < device/ridi/e70q10/patches/0006-documentsui-fix-usb-shortcut-color.patch
+patch -p1 < device/ridi/e70q10/patches/0007-framework-eink-policy.patch
+patch -p1 < device/ridi/e70q10/patches/0008-mesa-android-softpipe.patch
+patch -p1 < device/ridi/e70q10/patches/0009-pixelflinger-clip-raster-bounds.patch
 device/ridi/e70q10/tools/build_android8.sh check
 device/ridi/e70q10/tools/build_android8.sh build ramdisk
 device/ridi/e70q10/tools/build_android8.sh build bootimage
+E70Q10_RAMBOOT_PROFILE=minimal \
 device/ridi/e70q10/tools/make_stock_ramboot.sh
 ```
 
@@ -57,6 +63,14 @@ E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
 device/ridi/e70q10/tools/build_android8.sh build systemimage vendorimage
 ```
 
+Build the reference stock-U-Boot RAM-boot candidate from the same output:
+
+```sh
+E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
+E70Q10_RAMBOOT_PROFILE=reference \
+device/ridi/e70q10/tools/make_stock_ramboot.sh
+```
+
 The first verified build produced
 `out/target/product/e70q10/ramdisk.img` and `boot.img`. The NXP build places
 the DTB in the Android boot image `second` field, while the E70Q10 stock U-Boot
@@ -65,17 +79,18 @@ and the verified diagnostic images use a kernel-appended DTB. Therefore,
 never overwrites the standard build output. Build outputs are deliberately
 excluded from Git.
 
-Blocking work before an image can be installed:
+Graphics backend selection, the AGL/GLES1 recovery path, and the isolated
+Mesa softpipe benchmark procedure are documented in
+[`GRAPHICS_BRINGUP.md`](GRAPHICS_BRINGUP.md).
 
-1. Forward-port Netronix CYTTSP5, LM3630A and RTL8189FS support from
-   `reference-sources/tolino-epos/kernel_imx` to Linux 4.9, and production-harden
-   the already working RC5T619/TPS65185 ports.
-2. The stock waveform, shared ED078KH1/ED078KH3 timing profile, 16-bit EPDC bus
-   and PMIC sequence are hardware-verified with white and 16-step GC16 RAM-boot
-   refreshes. Finish repeated-update, temperature and suspend/resume validation.
-3. The source-complete HWC1/gralloc-v1 EPDC path now builds. Validate its
-   rate-limited `E70Q10_EPDC` submission/completion telemetry on the device,
-   then implement coalescing, partial regions and ghosting policy.
-4. Measure built images and define a recoverable replacement partition map.
-5. Prove RAM boot, ADB/serial recovery, suspend/resume and power-off before any
-   eMMC write.
+Current validation work:
+
+1. Build and deploy the static E Ink framework policy: no starting windows,
+   transitions, recents, lock screen, ripple or animated drawables.
+2. Validate gralloc's changed-region EPDC path: unchanged frames are skipped,
+   small changes use partial AUTO updates, and large or accumulated changes use
+   full GC16 cleanup updates.
+3. Tune partial-update thresholds, temperature handling and suspend/resume.
+4. Bring up RTL8189FS Wi-Fi and finish CYTTSP5 input validation.
+5. Keep all tests on `fastboot boot` plus external SD until recovery and
+   power-management behavior are proven.

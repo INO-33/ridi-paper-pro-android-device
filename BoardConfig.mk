@@ -2,6 +2,7 @@
 # in the EVK partition table, Broadcom Wi-Fi, camera or modem configuration.
 include device/fsl/imx6/soc/imx6sl.mk
 include device/fsl/imx6/BoardConfigCommon.mk
+include device/ridi/e70q10/graphics_backend.mk
 
 BUILD_TARGET_FS := ext4
 include device/fsl/imx6/imx6_target_fs.mk
@@ -19,6 +20,9 @@ TARGET_USES_HWC2 := false
 TARGET_HWCOMPOSER_VERSION := v1.0
 TARGET_HAVE_VIV_HWCOMPOSER := false
 PREBUILT_FSL_IMX_GPU := false
+ifeq ($(E70Q10_GRAPHICS_BACKEND),mesa)
+BOARD_GPU_DRIVERS := swrast
+endif
 
 BOARD_KERNEL_CMDLINE := console=ttymxc0,115200 init=/init \
     androidboot.console=ttymxc0 consoleblank=0 no_console_suspend \

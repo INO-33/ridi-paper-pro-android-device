@@ -2,14 +2,16 @@
 set -euo pipefail
 
 workspace="${RIDI_WORKSPACE:-/home/juwon/ridi}"
-product_out="${E70Q10_PRODUCT_OUT:-$workspace/android-out/e70q10/target/product/e70q10}"
-host_out="${ANDROID_HOST_OUT:-$workspace/android-out/e70q10/host/linux-x86}"
+out_dir="${E70Q10_OUT_DIR:-$workspace/android-out/e70q10}"
+product_out="${E70Q10_PRODUCT_OUT:-$out_dir/target/product/e70q10}"
+host_out="${ANDROID_HOST_OUT:-$out_dir/host/linux-x86}"
 tool_bin="${RIDI_ANDROID8_TOOL_BIN:-$workspace/host-tools/android8-bin}"
-kernel="$product_out/obj/KERNEL_OBJ/kernel_img"
-dtb="$product_out/obj/KERNEL_OBJ/imx6sl-e70q10.dtb"
+profile="${E70Q10_RAMBOOT_PROFILE:-minimal}"
+kernel="${E70Q10_KERNEL_IMAGE:-$product_out/obj/KERNEL_OBJ/kernel_img}"
+dtb="${E70Q10_DTB_IMAGE:-$product_out/obj/KERNEL_OBJ/imx6sl-e70q10.dtb}"
 ramdisk="$product_out/ramdisk.img"
-mkbootimg="$host_out/bin/mkbootimg"
-output="${1:-$product_out/e70q10-minimal-stock-ramboot.img}"
+mkbootimg="${E70Q10_MKBOOTIMG:-$host_out/bin/mkbootimg}"
+output="${1:-$product_out/e70q10-$profile-stock-ramboot.img}"
 
 [[ -x "$tool_bin/python" ]] || {
     echo "Missing Python 2 wrapper: $tool_bin/python" >&2

@@ -13,6 +13,7 @@
 | `ramdisk.img` | 1,704,886 | `aa36ecf08baacd8e80c87113e08140d26ecf168dc3d9bd7fed873e74ddddfe2d` |
 | `system.img` | 504,504,404 | `2d6a7caab7ba68bf9a674df656e04f326c50d0925d7c46b7ed89d9b404e98f89` |
 | `vendor.img` | 8,590,168 | `371a5d85e5903529bf9192646f328d32530752d6770d10cdf318f47d0ed70874` |
+| `e70q10-reference-stock-ramboot.img` | 11,751,424 | `3b9b2f5cd017782846f9cdf940a2d3ef59526ceacdeb107f20513394e673ebfb` |
 
 The sparse image sizes above are not the required SD partition sizes. Use the
 partition sizes from `BoardConfig.mk` and leave additional operational margin.
@@ -28,12 +29,14 @@ partition sizes from `BoardConfig.mk` and leave additional operational margin.
 - The 256 MiB vendor partition avoids the legacy `make_ext4fs` 128 MiB
   block-group boundary.
 
-## Next validation
+## Runtime validation
 
-These images have been built but not yet boot-tested. Before touching eMMC:
+The reference userspace now reaches `sys.boot_completed=1` from the external
+SD while the kernel is started with `fastboot boot`. SurfaceFlinger runs on
+AGL/PixelFlinger GLES1, the no-device audio and software keymaster services
+start, Total Launcher runs, and the YES24 fixed-orientation launch path no
+longer crashes `system_server`.
 
-1. produce the stock-U-Boot-compatible kernel-appended-DTB RAM boot image;
-2. write `system.img`, `vendor.img` and a fresh data filesystem only to the
-   separate reader work SD;
-3. verify its partition device names before writing;
-4. fastboot boot the converted boot image without flash or erase commands.
+No eMMC partition is written. The remaining display validation is the static
+E Ink framework policy plus gralloc changed-region EPDC refresh build currently
+described in `GRAPHICS_BRINGUP.md`.

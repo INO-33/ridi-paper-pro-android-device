@@ -1,11 +1,12 @@
 From: RIDI Paper Pro Android 8 bring-up
-Subject: [PATCH] gralloc: add rate-limited E70Q10 EPDC update telemetry
+Subject: [PATCH] imx display: make HWC1 and EPDC usable on E70Q10
 
 Apply from the Android source root:
 
   patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
 
 diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
+index a7430dd..a025b6f 100644
 --- a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
 +++ b/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
 @@ -30,6 +30,7 @@
@@ -16,7 +17,31 @@ diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vend
  
  #include <cutils/log.h>
  #include <cutils/atomic.h>
-@@ -87,14 +88,28 @@ static bool isEPDCDisplay()
+@@ -57,6 +58,11 @@
+ #define EPDC_WAITCOUNT 10
+ #define FB_NAME_PATH "/sys/class/graphics/fb0/name"
+ #define EPDC_DISPLAY_STR "epdc"
++#define E70Q10_WAVEFORM_DU 1
++#define E70Q10_WAVEFORM_GC16 2
++#define EPDC_FULL_REFRESH_INTERVAL 24
++#define EPDC_FULL_AREA_PERCENT 70
++#define EPDC_REGION_ALIGN 8
+ 
+ enum {
+     PAGE_FLIP = 0x00000001,
+@@ -66,6 +72,11 @@ enum {
+ struct fb_context_t {
+     framebuffer_device_t  device;
+     bool epdc_display;
++    unsigned char* epdc_shadow;
++    size_t epdc_shadow_size;
++    bool epdc_shadow_valid;
++    unsigned int epdc_partial_updates;
++    unsigned long epdc_post_count;
+ };
+ 
+ static bool isEPDCDisplay()
+@@ -87,16 +98,32 @@ static bool isEPDCDisplay()
  }
  
  __u32 marker_val = 1;
@@ -29,7 +54,8 @@ diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vend
 +}
 +
  static __u32 update_to_display(private_module_t* m, int left, int top, int width, int height,
-         int wave_mode, int wait_for_complete, uint flags)
+-        int wave_mode, int wait_for_complete, uint flags)
++        int wave_mode, int update_mode, int wait_for_complete, uint flags)
  {
  	struct mxcfb_update_data upd_data;
  	struct mxcfb_update_marker_data upd_marker_data;
@@ -43,9 +69,14 @@ diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vend
 +
 +	clock_gettime(CLOCK_MONOTONIC, &start_time);
  
- 	upd_data.update_mode = UPDATE_MODE_PARTIAL;
+-	upd_data.update_mode = UPDATE_MODE_PARTIAL;
++	memset(&upd_data, 0, sizeof(upd_data));
++	memset(&upd_marker_data, 0, sizeof(upd_marker_data));
++	upd_data.update_mode = update_mode;
  	upd_data.waveform_mode = wave_mode;
-@@ -117,8 +132,10 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
+ 	upd_data.update_region.left = left;
+ 	upd_data.update_region.width = width;
+@@ -117,8 +144,10 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
  		 * then try again after some updates have completed */
  		usleep(EPDC_WAITTIME_MS);
  		retval = ioctl(m->framebuffer->fd, MXCFB_SEND_UPDATE, &upd_data);
@@ -57,7 +88,7 @@ diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vend
  			wait = 0;
  			flags = 0;
  			break;
-@@ -132,11 +149,21 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
+@@ -132,11 +161,21 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
  		//retval = ioctl(fd_fb_ioctl, MXCFB_WAIT_FOR_UPDATE_COMPLETE, &upd_marker_data);
  		retval = ioctl(m->framebuffer->fd, MXCFB_WAIT_FOR_UPDATE_COMPLETE, &upd_marker_data);
  		if (retval < 0) {
@@ -71,12 +102,279 @@ diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vend
 +	clock_gettime(CLOCK_MONOTONIC, &end_time);
 +	if (sequence <= 8 || (sequence % 120) == 0 || retval < 0 || retries > 0) {
 +		ALOGI("E70Q10_EPDC seq=%lu marker=%u region=%d,%d %dx%d wave=%d "
-+			"wait=%d retries=%d result=%d latency_ms=%ld",
++			"mode=%d wait=%d retries=%d result=%d latency_ms=%ld",
 +			sequence, upd_data.update_marker, left, top, width, height,
-+			wave_mode, wait, retries, retval,
++			wave_mode, update_mode, wait, retries, retval,
 +			elapsed_ms(start_time, end_time));
 +	}
 +
  	if (flags & EPDC_FLAG_TEST_COLLISION) {
  		ALOGE("Collision test result = %d\n",
  			upd_marker_data.collision_test);
+@@ -172,6 +211,147 @@ static int fb_setUpdateRect(struct framebuffer_device_t* dev,
+     return 0;
+ }
+ 
++struct epdc_region_t {
++    int left;
++    int top;
++    int width;
++    int height;
++};
++
++static bool find_changed_region(const unsigned char* frame,
++        const unsigned char* shadow, int width, int height, int stride,
++        int bytes_per_pixel, epdc_region_t* region)
++{
++    int min_x = width;
++    int min_y = height;
++    int max_x = -1;
++    int max_y = -1;
++    const size_t visible_row_bytes = width * bytes_per_pixel;
++
++    for (int y = 0; y < height; y++) {
++        const unsigned char* frame_row = frame + y * stride;
++        const unsigned char* shadow_row = shadow + y * stride;
++
++        if (memcmp(frame_row, shadow_row, visible_row_bytes) == 0)
++            continue;
++
++        int row_min_x = 0;
++        while (row_min_x < width &&
++                memcmp(frame_row + row_min_x * bytes_per_pixel,
++                       shadow_row + row_min_x * bytes_per_pixel,
++                       bytes_per_pixel) == 0) {
++            row_min_x++;
++        }
++
++        int row_max_x = width - 1;
++        while (row_max_x > row_min_x &&
++                memcmp(frame_row + row_max_x * bytes_per_pixel,
++                       shadow_row + row_max_x * bytes_per_pixel,
++                       bytes_per_pixel) == 0) {
++            row_max_x--;
++        }
++
++        if (row_min_x < min_x)
++            min_x = row_min_x;
++        if (row_max_x > max_x)
++            max_x = row_max_x;
++        if (y < min_y)
++            min_y = y;
++        max_y = y;
++    }
++
++    if (max_x < 0 || max_y < 0)
++        return false;
++
++    const int aligned_left = (min_x / EPDC_REGION_ALIGN) * EPDC_REGION_ALIGN;
++    const int aligned_top = (min_y / EPDC_REGION_ALIGN) * EPDC_REGION_ALIGN;
++    int aligned_right = ((max_x + 1 + EPDC_REGION_ALIGN - 1) /
++            EPDC_REGION_ALIGN) * EPDC_REGION_ALIGN;
++    int aligned_bottom = ((max_y + 1 + EPDC_REGION_ALIGN - 1) /
++            EPDC_REGION_ALIGN) * EPDC_REGION_ALIGN;
++
++    if (aligned_right > width)
++        aligned_right = width;
++    if (aligned_bottom > height)
++        aligned_bottom = height;
++
++    region->left = aligned_left;
++    region->top = aligned_top;
++    region->width = aligned_right - aligned_left;
++    region->height = aligned_bottom - aligned_top;
++    return true;
++}
++
++static void epdc_refresh(fb_context_t* ctx, private_module_t* m,
++        const unsigned char* frame)
++{
++    const int width = m->info.xres;
++    const int height = m->info.yres;
++    const int stride = m->finfo.line_length;
++    const int bytes_per_pixel = m->info.bits_per_pixel >> 3;
++    const size_t frame_size = stride * height;
++    epdc_region_t region = { 0, 0, width, height };
++    bool full_refresh = !ctx->epdc_shadow_valid;
++
++    ctx->epdc_post_count++;
++
++    if (bytes_per_pixel <= 0 || frame == NULL) {
++        ALOGE("E70Q10_EPDC invalid frame bpp=%d frame=%p",
++                bytes_per_pixel, frame);
++        return;
++    }
++
++    if (ctx->epdc_shadow_size != frame_size) {
++        free(ctx->epdc_shadow);
++        ctx->epdc_shadow = (unsigned char*)malloc(frame_size);
++        ctx->epdc_shadow_size = ctx->epdc_shadow ? frame_size : 0;
++        ctx->epdc_shadow_valid = false;
++        ctx->epdc_partial_updates = 0;
++        full_refresh = true;
++        if (ctx->epdc_shadow == NULL)
++            ALOGE("E70Q10_EPDC shadow allocation failed size=%zu", frame_size);
++    }
++
++    if (ctx->epdc_shadow_valid) {
++        if (!find_changed_region(frame, ctx->epdc_shadow, width, height,
++                stride, bytes_per_pixel, &region)) {
++            if (ctx->epdc_post_count <= 8 ||
++                    (ctx->epdc_post_count % 120) == 0) {
++                ALOGI("E70Q10_EPDC unchanged post=%lu skip",
++                        ctx->epdc_post_count);
++            }
++            return;
++        }
++
++        const unsigned long changed_area =
++                (unsigned long)region.width * region.height;
++        const unsigned long screen_area = (unsigned long)width * height;
++        if (changed_area * 100 >=
++                screen_area * EPDC_FULL_AREA_PERCENT ||
++                ctx->epdc_partial_updates >= EPDC_FULL_REFRESH_INTERVAL) {
++            region.left = 0;
++            region.top = 0;
++            region.width = width;
++            region.height = height;
++            full_refresh = true;
++        }
++    }
++
++    update_to_display(m, region.left, region.top, region.width, region.height,
++            full_refresh ? E70Q10_WAVEFORM_GC16 : WAVEFORM_MODE_AUTO,
++            full_refresh ? UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL, 1, 0);
++
++    if (full_refresh)
++        ctx->epdc_partial_updates = 0;
++    else
++        ctx->epdc_partial_updates++;
++
++    if (ctx->epdc_shadow != NULL) {
++        memcpy(ctx->epdc_shadow, frame, frame_size);
++        ctx->epdc_shadow_valid = true;
++    }
++}
++
+ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+ {
+     if (private_handle_t::validate(buffer) < 0)
+@@ -183,7 +363,6 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+     private_module_t* m = reinterpret_cast<private_module_t*>(
+             dev->common.module);
+     if (hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER) {
+-	    int wave_mode = WAVEFORM_MODE_AUTO;
+         const size_t offset = hnd->base - m->framebuffer->base;
+         m->info.activate = FB_ACTIVATE_VBL;
+         m->info.yoffset = offset / m->finfo.line_length;
+@@ -193,11 +372,10 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+             return -errno;
+         }
+ 
+-        // Update EPDC with mode, and waveform setting
+-        if (ctx->epdc_display == true)
+-            update_to_display(m, 0, 0,
+-                    m->info.xres, m->info.yres,
+-                    WAVEFORM_MODE_AUTO, 1, 0);
++        if (ctx->epdc_display == true) {
++            epdc_refresh(ctx, m,
++                    reinterpret_cast<const unsigned char*>(hnd->base));
++        }
+ 
+         m->currentBuffer = buffer;
+         
+@@ -219,7 +397,12 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+                 &buffer_vaddr);
+ 
+         memcpy(fb_vaddr, buffer_vaddr, m->finfo.line_length * m->info.yres);
+-        
++
++        if (ctx->epdc_display == true) {
++            epdc_refresh(ctx, m,
++                    reinterpret_cast<const unsigned char*>(buffer_vaddr));
++        }
++
+         m->base.unlock(&m->base, buffer); 
+         m->base.unlock(&m->base, m->framebuffer); 
+     }
+@@ -408,6 +591,7 @@ static int fb_close(struct hw_device_t *dev)
+ {
+     fb_context_t* ctx = (fb_context_t*)dev;
+     if (ctx) {
++        free(ctx->epdc_shadow);
+         free(ctx);
+     }
+     return 0;
+diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp b/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp
+index 5a882e2..a606a64 100644
+--- a/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp
++++ b/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp
+@@ -31,6 +31,7 @@
+ #include <hardware/gralloc.h>
+ 
+ #include "gralloc_priv.h"
++#include "gr.h"
+ 
+ 
+ /* desktop Linux needs a little help with gettid() */
+@@ -43,12 +44,37 @@ pid_t gettid() { return syscall(__NR_gettid);}
+ 
+ /*****************************************************************************/
+ 
+-static int gralloc_map(gralloc_module_t const* /*module*/,
++static int gralloc_map(gralloc_module_t const* module,
+         buffer_handle_t handle,
+         void** vaddr)
+ {
+     private_handle_t* hnd = (private_handle_t*)handle;
+-    if (!(hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER)) {
++    if (hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER) {
++        /*
++         * Android 8 allocates through the binderized allocator HAL.  The
++         * framebuffer handle therefore contains a base address from another
++         * process.  NXP's original gralloc assumed allocation happened in
++         * SurfaceFlinger and left that address untouched, causing PixelFlinger
++         * to write through a stale mapping.
++         *
++         * Map fb0 once in the importing process and rebuild the per-page base
++         * from the transport-safe offset.
++         */
++        private_module_t* m = (private_module_t*)module;
++        int err = 0;
++
++        pthread_mutex_lock(&m->lock);
++        if (!m->framebuffer)
++            err = mapFrameBufferLocked(m);
++        if (!err) {
++            hnd->base = uintptr_t(m->framebuffer->base) + hnd->offset;
++            hnd->pid = getpid();
++        }
++        pthread_mutex_unlock(&m->lock);
++
++        if (err)
++            return err;
++    } else {
+         size_t size = hnd->size;
+         void* mappedAddress = mmap(0, size,
+                 PROT_READ|PROT_WRITE, MAP_SHARED, hnd->fd, 0);
+diff --git a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp
+index d26cde9..74163e9 100644
+--- a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp
++++ b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp
+@@ -266,6 +266,15 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+ 
+     hwc_get_framebuffer_info(dev);
+     hwc_get_display_type(dev);
++    /*
++     * EPDC does not provide a periodic scanout VSYNC like an LCD.  On the
++     * E70Q10, MXCFB_WAIT_FOR_VSYNC returns immediately, which makes the
++     * urgent-display VSyncThread spin and starve SurfaceFlinger's main loop.
++     * Use the existing timer-backed VSYNC implementation for EPDC instead.
++     */
++    if (dev->mDisplayType == HWC_DISPLAY_EPDC) {
++        dev->mVsyncThread->setFakeVSync(true);
++    }
+ 
+     *device = &dev->device.common;
+     ALOGI("<%s,%d>", __FUNCTION__, __LINE__);
+

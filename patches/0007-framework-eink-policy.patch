@@ -1,0 +1,377 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] frameworks: add E70Q10 static E Ink UI policy
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0007-framework-eink-policy.patch
+
+diff --git a/frameworks/base/core/java/android/app/Activity.java b/frameworks/base/core/java/android/app/Activity.java
+index 0ff3215e..007cdc25 100644
+--- a/frameworks/base/core/java/android/app/Activity.java
++++ b/frameworks/base/core/java/android/app/Activity.java
+@@ -16,7 +16,6 @@
+ 
+ package android.app;
+ 
+-import static android.os.Build.VERSION_CODES.O;
+ 
+ import static java.lang.Character.MIN_VALUE;
+ 
+@@ -977,17 +976,6 @@ public class Activity extends ContextThemeWrapper
+     protected void onCreate(@Nullable Bundle savedInstanceState) {
+         if (DEBUG_LIFECYCLE) Slog.v(TAG, "onCreate " + this + ": " + savedInstanceState);
+ 
+-        if (getApplicationInfo().targetSdkVersion > O && mActivityInfo.isFixedOrientation()) {
+-            final TypedArray ta = obtainStyledAttributes(com.android.internal.R.styleable.Window);
+-            final boolean isTranslucentOrFloating = ActivityInfo.isTranslucentOrFloating(ta);
+-            ta.recycle();
+-
+-            if (isTranslucentOrFloating) {
+-                throw new IllegalStateException(
+-                        "Only fullscreen opaque activities can request orientation");
+-            }
+-        }
+-
+         if (mLastNonConfigurationInstances != null) {
+             mFragments.restoreLoaderNonConfig(mLastNonConfigurationInstances.loaders);
+         }
+diff --git a/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java b/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java
+index d714ca83..60f9f1a0 100644
+--- a/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java
++++ b/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java
+@@ -26,6 +26,7 @@ import android.content.res.Resources.Theme;
+ import android.util.AttributeSet;
+ import android.util.TypedValue;
+ import android.os.SystemClock;
++import android.os.SystemProperties;
+ 
+ import org.xmlpull.v1.XmlPullParser;
+ import org.xmlpull.v1.XmlPullParserException;
+@@ -80,6 +81,9 @@ public class AnimatedRotateDrawable extends DrawableWrapper implements Animatabl
+      */
+     @Override
+     public void start() {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
+         if (!mRunning) {
+             mRunning = true;
+             nextFrame();
+diff --git a/frameworks/base/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java b/frameworks/base/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
+index 90d6ab86..c537740d 100644
+--- a/frameworks/base/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
++++ b/frameworks/base/graphics/java/android/graphics/drawable/AnimatedVectorDrawable.java
+@@ -40,6 +40,7 @@ import android.graphics.PixelFormat;
+ import android.graphics.PorterDuff;
+ import android.graphics.Rect;
+ import android.os.Build;
++import android.os.SystemProperties;
+ import android.util.ArrayMap;
+ import android.util.AttributeSet;
+ import android.util.IntArray;
+@@ -911,6 +912,9 @@ public class AnimatedVectorDrawable extends Drawable implements Animatable2 {
+ 
+     @Override
+     public void start() {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
+         ensureAnimatorSet();
+         if (DBG_ANIMATION_VECTOR_DRAWABLE) {
+             Log.w(LOGTAG, "calling start on AVD: " +
+diff --git a/frameworks/base/graphics/java/android/graphics/drawable/AnimationDrawable.java b/frameworks/base/graphics/java/android/graphics/drawable/AnimationDrawable.java
+index 0fd17416..384a0a48 100644
+--- a/frameworks/base/graphics/java/android/graphics/drawable/AnimationDrawable.java
++++ b/frameworks/base/graphics/java/android/graphics/drawable/AnimationDrawable.java
+@@ -28,6 +28,7 @@ import android.content.res.Resources;
+ import android.content.res.TypedArray;
+ import android.content.res.Resources.Theme;
+ import android.os.SystemClock;
++import android.os.SystemProperties;
+ import android.util.AttributeSet;
+ 
+ /**
+@@ -150,6 +151,10 @@ public class AnimationDrawable extends DrawableContainer implements Runnable, An
+      */
+     @Override
+     public void start() {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            setFrame(0, false, false);
++            return;
++        }
+         mAnimating = true;
+ 
+         if (!isRunning()) {
+@@ -441,4 +446,3 @@ public class AnimationDrawable extends DrawableContainer implements Runnable, An
+         }
+     }
+ }
+-
+diff --git a/frameworks/base/graphics/java/android/graphics/drawable/RippleDrawable.java b/frameworks/base/graphics/java/android/graphics/drawable/RippleDrawable.java
+index 8f314c9c..077aff75 100644
+--- a/frameworks/base/graphics/java/android/graphics/drawable/RippleDrawable.java
++++ b/frameworks/base/graphics/java/android/graphics/drawable/RippleDrawable.java
+@@ -40,6 +40,7 @@ import android.graphics.PorterDuff;
+ import android.graphics.PorterDuffColorFilter;
+ import android.graphics.Rect;
+ import android.graphics.Shader;
++import android.os.SystemProperties;
+ import android.util.AttributeSet;
+ 
+ import java.io.IOException;
+@@ -248,6 +249,10 @@ public class RippleDrawable extends LayerDrawable {
+     @Override
+     protected boolean onStateChange(int[] stateSet) {
+         final boolean changed = super.onStateChange(stateSet);
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            clearHotspots();
++            return changed;
++        }
+ 
+         boolean enabled = false;
+         boolean pressed = false;
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java
+index 86dde54f..a22d1406 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java
+@@ -82,6 +82,8 @@ public class Recents extends SystemUI
+ 
+     private final static String TAG = "Recents";
+     private final static boolean DEBUG = false;
++    private static final boolean EINK_MODE =
++            SystemProperties.getBoolean("ro.ridi.eink_mode", false);
+ 
+     public final static int EVENT_BUS_PRIORITY = 1;
+     public final static int BIND_TO_SYSTEM_USER_RETRY_DELAY = 5000;
+@@ -253,6 +255,9 @@ public class Recents extends SystemUI
+      */
+     @Override
+     public void showRecentApps(boolean triggeredFromAltTab, boolean fromHome) {
++        if (EINK_MODE) {
++            return;
++        }
+         // Ensure the device has been provisioned before allowing the user to interact with
+         // recents
+         if (!isUserSetup()) {
+@@ -297,6 +302,9 @@ public class Recents extends SystemUI
+      */
+     @Override
+     public void hideRecentApps(boolean triggeredFromAltTab, boolean triggeredFromHomeKey) {
++        if (EINK_MODE) {
++            return;
++        }
+         // Ensure the device has been provisioned before allowing the user to interact with
+         // recents
+         if (!isUserSetup()) {
+@@ -332,6 +340,9 @@ public class Recents extends SystemUI
+      */
+     @Override
+     public void toggleRecentApps() {
++        if (EINK_MODE) {
++            return;
++        }
+         // Ensure the device has been provisioned before allowing the user to interact with
+         // recents
+         if (!isUserSetup()) {
+@@ -369,6 +380,9 @@ public class Recents extends SystemUI
+      */
+     @Override
+     public void preloadRecentApps() {
++        if (EINK_MODE) {
++            return;
++        }
+         // Ensure the device has been provisioned before allowing the user to interact with
+         // recents
+         if (!isUserSetup()) {
+@@ -397,6 +411,9 @@ public class Recents extends SystemUI
+ 
+     @Override
+     public void cancelPreloadRecentApps() {
++        if (EINK_MODE) {
++            return;
++        }
+         // Ensure the device has been provisioned before allowing the user to interact with
+         // recents
+         if (!isUserSetup()) {
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java
+index 75771364..fa126f42 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java
+@@ -24,6 +24,7 @@ import android.content.Context;
+ import android.content.res.Configuration;
+ import android.content.res.Resources;
+ import android.os.SystemClock;
++import android.os.SystemProperties;
+ import android.util.AttributeSet;
+ import android.util.Log;
+ import android.view.InputDevice;
+@@ -53,6 +54,8 @@ public abstract class PanelView extends FrameLayout {
+     public static final String TAG = PanelView.class.getSimpleName();
+     private static final int INITIAL_OPENING_PEEK_DURATION = 200;
+     private static final int PEEK_ANIMATION_DURATION = 360;
++    private static final boolean EINK_MODE =
++            SystemProperties.getBoolean("ro.ridi.eink_mode", false);
+     private long mDownTime;
+     private float mMinExpandHeight;
+     private LockscreenGestureLogger mLockscreenGestureLogger = new LockscreenGestureLogger();
+@@ -240,6 +243,22 @@ public abstract class PanelView extends FrameLayout {
+ 
+     @Override
+     public boolean onTouchEvent(MotionEvent event) {
++        if (EINK_MODE) {
++            switch (event.getActionMasked()) {
++                case MotionEvent.ACTION_DOWN:
++                    mPanelClosedOnDown = isFullyCollapsed();
++                    return true;
++                case MotionEvent.ACTION_UP:
++                    if (mPanelClosedOnDown) {
++                        expand(false /* animate */);
++                    }
++                    return true;
++                case MotionEvent.ACTION_CANCEL:
++                case MotionEvent.ACTION_MOVE:
++                default:
++                    return true;
++            }
++        }
+         if (mInstantExpanding || mTouchDisabled
+                 || (mMotionAborted && event.getActionMasked() != MotionEvent.ACTION_DOWN)) {
+             return false;
+@@ -711,6 +730,13 @@ public abstract class PanelView extends FrameLayout {
+ 
+     protected void flingToHeight(float vel, boolean expand, float target,
+             float collapseSpeedUpFactor, boolean expandBecauseOfFalsing) {
++        if (EINK_MODE) {
++            cancelHeightAnimator();
++            setExpandedHeight(target);
++            notifyExpandingFinished();
++            notifyBarPanelExpansionChanged();
++            return;
++        }
+         // Hack to make the expand transition look nice when clear all button is visible - we make
+         // the animation only to the last notification, and then jump to the maximum panel height so
+         // clear all just fades in and the decelerating motion is towards the last notification.
+diff --git a/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java b/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java
+index a3ad971b..b3a08da0 100644
+--- a/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java
++++ b/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java
+@@ -141,6 +141,7 @@ import android.os.PersistableBundle;
+ import android.os.Process;
+ import android.os.RemoteException;
+ import android.os.SystemClock;
++import android.os.SystemProperties;
+ import android.os.Trace;
+ import android.os.UserHandle;
+ import android.service.voice.IVoiceInteractionSession;
+@@ -2162,6 +2163,9 @@ final class ActivityRecord extends ConfigurationContainer implements AppWindowCo
+ 
+     void showStartingWindow(ActivityRecord prev, boolean newTask, boolean taskSwitch,
+             boolean fromRecents) {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
+         if (mWindowContainerController == null) {
+             return;
+         }
+@@ -2196,11 +2200,6 @@ final class ActivityRecord extends ConfigurationContainer implements AppWindowCo
+     }
+ 
+     void setRequestedOrientation(int requestedOrientation) {
+-        if (ActivityInfo.isFixedOrientation(requestedOrientation) && !fullscreen
+-                && appInfo.targetSdkVersion > O) {
+-            throw new IllegalStateException("Only fullscreen activities can request orientation");
+-        }
+-
+         final int displayId = getDisplayId();
+         final Configuration displayConfig =
+                 mStackSupervisor.getDisplayOverrideConfiguration(displayId);
+diff --git a/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java b/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java
+index 7407fd4b..b4b0c76c 100644
+--- a/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java
++++ b/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java
+@@ -4063,6 +4063,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+     }
+ 
+     private void preloadRecentApps() {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
+         mPreloadedRecentApps = true;
+         StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
+         if (statusbar != null) {
+@@ -4081,6 +4084,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+     }
+ 
+     private void toggleRecentApps() {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
+         mPreloadedRecentApps = false; // preloading no longer needs to be canceled
+         StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
+         if (statusbar != null) {
+@@ -4095,6 +4101,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+     }
+ 
+     private void showRecentApps(boolean triggeredFromAltTab, boolean fromHome) {
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
+         mPreloadedRecentApps = false; // preloading no longer needs to be canceled
+         StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
+         if (statusbar != null) {
+diff --git a/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java b/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java
+index 0c62be6e..eea98798 100644
+--- a/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java
++++ b/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java
+@@ -160,6 +160,8 @@ public class AppTransition implements Dump {
+     private static final float RECENTS_THUMBNAIL_FADEOUT_FRACTION = 0.5f;
+ 
+     static final int DEFAULT_APP_TRANSITION_DURATION = 336;
++    private static final boolean EINK_MODE =
++            SystemProperties.getBoolean("ro.ridi.eink_mode", false);
+ 
+     /** Interpolator to be used for animations that respond directly to a touch */
+     static final Interpolator TOUCH_RESPONSE_INTERPOLATOR =
+@@ -357,8 +359,9 @@ public class AppTransition implements Dump {
+ 
+     /** Returns whether the next thumbnail transition is aspect scaled up. */
+     boolean isNextThumbnailTransitionAspectScaled() {
+-        return mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_UP ||
+-                mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_DOWN;
++        return !EINK_MODE
++                && (mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_UP
++                || mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_DOWN);
+     }
+ 
+     /** Returns whether the next thumbnail transition is scaling up. */
+@@ -367,13 +370,15 @@ public class AppTransition implements Dump {
+     }
+ 
+     boolean isNextAppTransitionThumbnailUp() {
+-        return mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_SCALE_UP ||
+-                mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_UP;
++        return !EINK_MODE
++                && (mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_SCALE_UP
++                || mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_UP);
+     }
+ 
+     boolean isNextAppTransitionThumbnailDown() {
+-        return mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_SCALE_DOWN ||
+-                mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_DOWN;
++        return !EINK_MODE
++                && (mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_SCALE_DOWN
++                || mNextAppTransitionType == NEXT_TRANSIT_TYPE_THUMBNAIL_ASPECT_SCALE_DOWN);
+     }
+ 
+     /**
+@@ -1498,6 +1503,9 @@ public class AppTransition implements Dump {
+             int orientation, Rect frame, Rect displayFrame, Rect insets,
+             @Nullable Rect surfaceInsets, boolean isVoiceInteraction, boolean freeform,
+             int taskId) {
++        if (EINK_MODE) {
++            return null;
++        }
+         Animation a;
+         if (isKeyguardGoingAwayTransit(transit) && enter) {
+             a = loadKeyguardExitAnimation(transit);
+

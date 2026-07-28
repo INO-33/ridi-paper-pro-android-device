@@ -1,0 +1,35 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] pixelflinger: clip raster bounds on E70Q10
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0009-pixelflinger-clip-raster-bounds.patch
+
+diff --git a/system/core/libpixelflinger/trap.cpp b/system/core/libpixelflinger/trap.cpp
+index 234bfdd..abebcaa 100644
+--- a/system/core/libpixelflinger/trap.cpp
++++ b/system/core/libpixelflinger/trap.cpp
+@@ -740,8 +740,9 @@ triangle_sweep_edges( Edge*  left,
+     left->x  += left_xi * count;
+     right->x += right_xi * count;
+ 
+-	const int xmin = c->state.scissor.left;
+-	const int xmax = c->state.scissor.right;
++    const int xmin = max(int(c->state.scissor.left), 0);
++    const int xmax = min(int(c->state.scissor.right),
++                         int(c->state.buffers.color.width));
+     do {
+         // horizontal scissoring
+         const int32_t xl = max(left_x  >> TRI_ITERATORS_BITS, xmin);
+@@ -749,7 +750,9 @@ triangle_sweep_edges( Edge*  left,
+         left_x  += left_xi;
+         right_x += right_xi;
+         // invoke the scanline rasterizer
+-        if (ggl_likely(xl < xr)) {
++        const int32_t y = c->iterators.y;
++        if (ggl_likely(xl < xr && y >= 0 &&
++                       uint32_t(y) < c->state.buffers.color.height)) {
+             c->iterators.xl = xl;
+             c->iterators.xr = xr;
+             c->scanline(c);
+
