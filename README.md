@@ -106,10 +106,17 @@ still pulls phone, Bluetooth, NFC, printing, PIM, music and decoration apps
 into an AOSP Oreo image. Launcher2 remains only as a recovery HOME until Total
 Launcher is packaged as a system application.
 
-The device-unique extracted waveform is intentionally not committed. Place it
-at `stock-blobs/imx/epdc/epdc_ED078KH1.fw`; the reference product copies it to
-`/vendor/firmware/imx/epdc/`. Without this file the EPDC driver remains
-uninitialized and `MXCFB_SEND_UPDATE` returns `EPERM`.
+This repository is private, so the device-unique blobs the port cannot be
+rebuilt without are committed here:
+
+- `stock-blobs/imx/epdc/epdc_ED078KH1.fw` is the extracted EPDC waveform. The
+  reference product copies it to `/vendor/firmware/imx/epdc/`. Without this
+  file the EPDC driver stays uninitialized and `MXCFB_SEND_UPDATE` returns
+  `EPERM`.
+- `prebuilt/8189fs.ko` is the RTL8189FS Wi-Fi kernel module.
+
+Both are extracted from the device and are not redistributable. Keep this
+repository private, and do not mirror it to a public remote.
 
 Current validation work:
 

@@ -3,8 +3,12 @@ out/
 .vscode/
 *.log
 
-# Never publish extracted firmware or device-unique data here.
-stock-blobs/
+# This repository is private and deliberately keeps the device-unique blobs
+# this port cannot be rebuilt without: the extracted EPDC waveform under
+# stock-blobs/ and the Wi-Fi kernel module under prebuilt/. Keep it private.
+#
+# Whole partition and disk images stay out: they are large, they are
+# reproducible from a build, and they may carry user data.
 backups/
 device-dumps/
 *.img
