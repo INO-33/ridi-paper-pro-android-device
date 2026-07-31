@@ -61,6 +61,9 @@ patch -p1 < device/ridi/e70q10/patches/0006-documentsui-fix-usb-shortcut-color.p
 patch -p1 < device/ridi/e70q10/patches/0007-framework-eink-policy.patch
 patch -p1 < device/ridi/e70q10/patches/0008-mesa-android-softpipe.patch
 patch -p1 < device/ridi/e70q10/patches/0009-pixelflinger-clip-raster-bounds.patch
+patch -p1 < device/ridi/e70q10/patches/0010-native-eink-policy-transport.patch
+patch -p1 < device/ridi/e70q10/patches/0011-imx-display-eink-policy.patch
+patch -p1 < device/ridi/e70q10/patches/0012-settings-reader-ui.patch
 device/ridi/e70q10/tools/build_android8.sh check
 device/ridi/e70q10/tools/build_android8.sh build ramdisk
 device/ridi/e70q10/tools/build_android8.sh build bootimage

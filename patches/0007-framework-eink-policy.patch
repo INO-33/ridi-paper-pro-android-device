@@ -1,10 +1,7 @@
 From: RIDI Paper Pro Android 8 bring-up
-Subject: [PATCH] frameworks: add E70Q10 static E Ink UI policy
-
+Subject: [PATCH] frameworks/base: E70Q10 static E Ink UI policy and reader SystemUI
 Apply from the Android source root:
-
   patch -p1 < device/ridi/e70q10/patches/0007-framework-eink-policy.patch
-
 diff --git a/frameworks/base/core/java/android/app/Activity.java b/frameworks/base/core/java/android/app/Activity.java
 index 0ff3215e..007cdc25 100644
 --- a/frameworks/base/core/java/android/app/Activity.java
@@ -35,6 +32,841 @@ index 0ff3215e..007cdc25 100644
          if (mLastNonConfigurationInstances != null) {
              mFragments.restoreLoaderNonConfig(mLastNonConfigurationInstances.loaders);
          }
+diff --git a/frameworks/base/core/java/android/app/WallpaperManager.java b/frameworks/base/core/java/android/app/WallpaperManager.java
+index 84839bf8..b0ada2ca 100644
+--- a/frameworks/base/core/java/android/app/WallpaperManager.java
++++ b/frameworks/base/core/java/android/app/WallpaperManager.java
+@@ -310,6 +310,13 @@ public class WallpaperManager {
+          */
+         public void addOnColorsChangedListener(@NonNull OnColorsChangedListener callback,
+                 @Nullable Handler handler, int userId) {
++            // Products that build without the wallpaper service have no binder
++            // here. Every other method on this class already tolerates that, so
++            // do the same instead of throwing from a caller's constructor.
++            if (mService == null) {
++                Log.w(TAG, "WallpaperService not running");
++                return;
++            }
+             synchronized (this) {
+                 if (!mColorCallbackRegistered) {
+                     try {
+@@ -375,6 +382,12 @@ public class WallpaperManager {
+                 throw new IllegalArgumentException(
+                         "Must request colors for exactly one kind of wallpaper");
+             }
++            // No wallpaper service on this product: report "no colours" instead
++            // of crashing the caller.
++            if (mService == null) {
++                Log.w(TAG, "WallpaperService not running");
++                return null;
++            }
+ 
+             try {
+                 return mService.getWallpaperColors(which, userId);
+diff --git a/frameworks/base/core/java/android/os/Build.java b/frameworks/base/core/java/android/os/Build.java
+index a2fb9db8..f57dd430 100644
+--- a/frameworks/base/core/java/android/os/Build.java
++++ b/frameworks/base/core/java/android/os/Build.java
+@@ -92,8 +92,12 @@ public class Build {
+     @Deprecated
+     public static final String RADIO = getString(TelephonyProperties.PROPERTY_BASEBAND_VERSION);
+ 
+-    /** The name of the hardware (from the kernel command line or /proc). */
+-    public static final String HARDWARE = getString("ro.hardware");
++    /**
++     * The application-facing hardware name.  Keep ro.hardware untouched because init and
++     * native HAL discovery use E70Q10, while legacy i.MX6 E Ink SDKs detect "freescale" here.
++     */
++    public static final String HARDWARE =
++            SystemProperties.get("ro.hardware.app", getString("ro.hardware"));
+ 
+     /**
+      * Whether this build was for an emulator device.
+diff --git a/frameworks/base/core/java/android/view/Surface.java b/frameworks/base/core/java/android/view/Surface.java
+index 4f9dbd5a..b85de4b8 100644
+--- a/frameworks/base/core/java/android/view/Surface.java
++++ b/frameworks/base/core/java/android/view/Surface.java
+@@ -73,6 +73,7 @@ public class Surface implements Parcelable {
+ 
+     private static native long nativeGetNextFrameNumber(long nativeObject);
+     private static native int nativeSetScalingMode(long nativeObject, int scalingMode);
++    private static native void nativeSetEinkUpdateMode(long nativeObject, int updateMode);
+     private static native void nativeSetBuffersTransform(long nativeObject, long transform);
+     private static native int nativeForceScopedDisconnect(long nativeObject);
+     private static native int nativeAttachAndQueueBuffer(long nativeObject, GraphicBuffer buffer);
+@@ -275,6 +276,19 @@ public class Surface implements Parcelable {
+      * @return True if the consumer is more than one buffer ahead of the producer.
+      * @hide
+      */
++    /**
++     * Attaches a packed RIDI/Onyx E Ink policy to the next buffer queued by
++     * this Surface.  The native Surface consumes it only after a successful
++     * queueBuffer, keeping policy and producer damage on the same frame.
++     * @hide
++     */
++    void setEinkUpdateMode(int updateMode) {
++        synchronized (mLock) {
++            checkNotReleasedLocked();
++            nativeSetEinkUpdateMode(mNativeObject, updateMode);
++        }
++    }
++
+     public boolean isConsumerRunningBehind() {
+         synchronized (mLock) {
+             checkNotReleasedLocked();
+diff --git a/frameworks/base/core/java/android/view/View.java b/frameworks/base/core/java/android/view/View.java
+index 47e8b58e..00241da7 100644
+--- a/frameworks/base/core/java/android/view/View.java
++++ b/frameworks/base/core/java/android/view/View.java
+@@ -799,6 +799,86 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      */
+     public static final int NO_ID = -1;
+ 
++    /*
++     * RIDI/Onyx legacy E Ink ABI.  The low bits are intentionally identical to
++     * the stock Paper Pro 4.4.2 framework so applications can pass one packed
++     * value through invalidate(..., updateMode).
++     */
++    public static final int EINK_WAVEFORM_MODE_INIT = 0;
++    public static final int EINK_WAVEFORM_MODE_DU = 1;
++    public static final int EINK_WAVEFORM_MODE_GC16 = 2;
++    public static final int EINK_WAVEFORM_MODE_GC4 = 3;
++    public static final int EINK_WAVEFORM_MODE_ANIM = 4;
++    public static final int EINK_WAVEFORM_MODE_A2 = 5;
++    public static final int EINK_WAVEFORM_MODE_AUTO = 5;
++    public static final int EINK_WAVEFORM_MODE_GL16 = 6;
++    public static final int EINK_WAVEFORM_MODE_GLR16 = 7;
++    public static final int EINK_WAVEFORM_MODE_GLD16 = 8;
++    public static final int EINK_WAVEFORM_MODE_REAGL = EINK_WAVEFORM_MODE_GLR16;
++    public static final int EINK_WAVEFORM_MODE_REAGLD = EINK_WAVEFORM_MODE_GLD16;
++    public static final int EINK_REAGL_MODE_REAGLD = EINK_WAVEFORM_MODE_GLD16;
++    public static final int EINK_WAVEFORM_MODE_MASK = 0x0f;
++
++    public static final int EINK_AUTO_MODE_REGIONAL = 0;
++    public static final int EINK_AUTO_MODE_AUTOMATIC = 0x10;
++    public static final int EINK_AUTO_MODE_MASK = 0x10;
++    public static final int EINK_ONYX_AUTO_MASK = EINK_AUTO_MODE_MASK;
++    public static final int EINK_ONYX_GC_MASK = EINK_WAVEFORM_MODE_MASK;
++
++    public static final int EINK_UPDATE_MODE_PARTIAL = 0;
++    public static final int EINK_UPDATE_MODE_FULL = 0x20;
++    public static final int EINK_UPDATE_MODE_MASK = 0x20;
++    public static final int EINK_WAIT_MODE_NOWAIT = 0;
++    public static final int EINK_WAIT_MODE_WAIT = 0x40;
++    public static final int EINK_WAIT_MODE_MASK = 0x40;
++    public static final int EINK_COMBINE_MODE_NOCOMBINE = 0;
++    public static final int EINK_COMBINE_MODE_COMBINE = 0x80;
++    public static final int EINK_COMBINE_MODE_MASK = 0x80;
++    public static final int EINK_DITHER_MODE_NODITHER = 0;
++    public static final int EINK_DITHER_MODE_DITHER = 0x100;
++    public static final int EINK_DITHER_MODE_MASK = 0x100;
++    public static final int EINK_INVERT_MODE_NOINVERT = 0;
++    public static final int EINK_INVERT_MODE_INVERT = 0x200;
++    public static final int EINK_INVERT_MODE_MASK = 0x200;
++    public static final int EINK_CONVERT_MODE_NOCONVERT = 0;
++    public static final int EINK_CONVERT_MODE_CONVERT = 0x400;
++    public static final int EINK_CONVERT_MODE_MASK = 0x400;
++    public static final int EINK_DITHER_COLOR_Y4 = 0;
++    public static final int EINK_DITHER_COLOR_Y1 = 0x800;
++    public static final int EINK_DITHER_COLOR_MASK = 0x800;
++
++    // Onyx aliases used by IMX6Device.createDevice().
++    public static final int UI_A2_QUALITY_MODE = EINK_WAVEFORM_MODE_A2;
++
++    static final int EINK_MODE_UNSPECIFIED = -1;
++    static final int EINK_POLICY_VALID = 0x20000000;
++    static final int EINK_POLICY_DISABLE = 0x40000000;
++    /**
++     * Marks a policy the framework supplied on the application's behalf.  A
++     * system default must never suppress the driver's ghost-cleanup promotion,
++     * while an application's own PARTIAL request must be honored verbatim.
++     */
++    static final int EINK_POLICY_SYSTEM_DEFAULT = 0x10000000;
++    private static final int EINK_DEFAULT_UPDATE_MODE = EINK_WAVEFORM_MODE_AUTO
++            | EINK_AUTO_MODE_AUTOMATIC | EINK_UPDATE_MODE_PARTIAL | EINK_WAIT_MODE_NOWAIT;
++    private static final int EINK_DEFAULT_FIRST_DRAW_MODE = EINK_WAVEFORM_MODE_GC16
++            | EINK_UPDATE_MODE_FULL | EINK_WAIT_MODE_NOWAIT;
++
++    private static volatile int sEinkGlobalUpdateMode = EINK_MODE_UNSPECIFIED;
++    private static volatile int sEinkFirstDrawUpdateMode = EINK_MODE_UNSPECIFIED;
++    /**
++     * Number of Views that currently carry an explicit default update mode.
++     * Ancestor lookup during invalidation is skipped entirely while this is
++     * zero, so applications that never use the E Ink API pay nothing.
++     */
++    private static final java.util.concurrent.atomic.AtomicInteger sEinkViewDefaultCount =
++            new java.util.concurrent.atomic.AtomicInteger();
++    private static volatile boolean sEinkScreenUpdatesEnabled = true;
++    private static volatile boolean sEinkRegalEnabled = true;
++    private static volatile int sEinkDisplayScheme;
++    /** Bounded diagnostic counter for legacy E Ink API entry points. */
++    private static volatile int sEinkApiLogs;
++
+     /**
+      * Last ID that is given to Views that are no part of activities.
+      *
+@@ -3695,6 +3775,9 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+     int mPrivateFlags2;
+     int mPrivateFlags3;
+ 
++    /** One-shot default applied when this View invalidates without an explicit E Ink mode. */
++    private int mEinkDefaultUpdateMode = EINK_MODE_UNSPECIFIED;
++
+     /**
+      * This view's request for the visibility of the status bar.
+      * @hide
+@@ -15363,6 +15446,257 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+         return false;
+     }
+ 
++    /**
++     * Set the packed mode used by subsequent ordinary invalidations of this View.
++     * This is an Onyx compatibility alias; stock RIDI applications normally use
++     * the invalidate(..., updateMode) overloads directly.
++     */
++    public void setDefaultUpdateMode(int updateMode) {
++        if (sEinkApiLogs < 24) {
++            sEinkApiLogs++;
++            Log.i("E70Q10_VIEW", "setDefaultUpdateMode mode=0x"
++                    + Integer.toHexString(updateMode) + " view="
++                    + getClass().getName());
++        }
++        final int previous = mEinkDefaultUpdateMode;
++        mEinkDefaultUpdateMode = updateMode;
++        if (previous == EINK_MODE_UNSPECIFIED && updateMode != EINK_MODE_UNSPECIFIED) {
++            sEinkViewDefaultCount.incrementAndGet();
++        } else if (previous != EINK_MODE_UNSPECIFIED && updateMode == EINK_MODE_UNSPECIFIED) {
++            sEinkViewDefaultCount.decrementAndGet();
++        }
++    }
++
++    public int getDefaultUpdateMode() {
++        return mEinkDefaultUpdateMode != EINK_MODE_UNSPECIFIED
++                ? mEinkDefaultUpdateMode : getGlobalUpdateMode();
++    }
++
++    public void resetUpdateMode() {
++        setDefaultUpdateMode(EINK_MODE_UNSPECIFIED);
++    }
++
++    /**
++     * Resolve the packed mode for an ordinary invalidation of this View.
++     *
++     * <p>Onyx applications set the mode once on a container and then let its
++     * children repaint, so a default set on an ancestor has to apply to the
++     * whole subtree. The lookup is skipped unless some View in the process
++     * actually set a default.</p>
++     */
++    private int resolveInheritedEinkUpdateMode() {
++        if (mEinkDefaultUpdateMode != EINK_MODE_UNSPECIFIED) {
++            return mEinkDefaultUpdateMode;
++        }
++        if (sEinkViewDefaultCount.get() == 0) {
++            return EINK_MODE_UNSPECIFIED;
++        }
++        ViewParent parent = mParent;
++        while (parent instanceof View) {
++            final View ancestor = (View) parent;
++            if (ancestor.mEinkDefaultUpdateMode != EINK_MODE_UNSPECIFIED) {
++                return ancestor.mEinkDefaultUpdateMode;
++            }
++            parent = ancestor.mParent;
++        }
++        return EINK_MODE_UNSPECIFIED;
++    }
++
++    /**
++     * Physically refresh this View with the given packed mode even when the
++     * pixels did not change. This is the Onyx {@code refreshScreen} entry point
++     * used to clear accumulated E Ink residue.
++     */
++    public void refreshScreen(int updateMode) {
++        refreshScreen(0, 0, mRight - mLeft, mBottom - mTop, updateMode);
++    }
++
++    /** Region variant of {@link #refreshScreen(int)}. */
++    public void refreshScreen(int left, int top, int right, int bottom, int updateMode) {
++        final AttachInfo ai = mAttachInfo;
++        if (ai != null && updateMode != EINK_MODE_UNSPECIFIED) {
++            // Register the request even if the repaint below produces no dirty
++            // area, so the next posted frame still carries this waveform.
++            ai.addEinkUpdateMode(updateMode);
++        }
++        if (right > left && bottom > top) {
++            invalidate(left, top, right, bottom, updateMode);
++        } else {
++            invalidate(updateMode);
++        }
++    }
++
++    /** Onyx capability probe: this panel supports the REAGL waveforms. */
++    public static boolean supportRegal() {
++        return true;
++    }
++
++    /** Onyx REAGL toggle. Waveform selection stays per-invalidation. */
++    public static void enableRegal(boolean enable) {
++        sEinkRegalEnabled = enable;
++    }
++
++    public void setUpdateMode(int updateMode) {
++        setDefaultUpdateMode(updateMode);
++    }
++
++    public void setViewDefaultUpdateMode(int updateMode) {
++        setDefaultUpdateMode(updateMode);
++    }
++
++    public int getViewDefaultUpdateMode() {
++        return getDefaultUpdateMode();
++    }
++
++    public void resetViewUpdateMode() {
++        resetUpdateMode();
++    }
++
++    public static void setGlobalUpdateMode(int updateMode) {
++        sEinkGlobalUpdateMode = updateMode;
++    }
++
++    public static int getGlobalUpdateMode() {
++        return sEinkGlobalUpdateMode != EINK_MODE_UNSPECIFIED
++                ? sEinkGlobalUpdateMode : EINK_DEFAULT_UPDATE_MODE;
++    }
++
++    public static void setSystemDefaultUpdateMode(int updateMode) {
++        setGlobalUpdateMode(updateMode);
++    }
++
++    public static int getSystemDefaultUpdateMode() {
++        return getGlobalUpdateMode();
++    }
++
++    public static void setFirstDrawUpdateMode(int updateMode) {
++        sEinkFirstDrawUpdateMode = updateMode;
++    }
++
++    public static void setWaveformAndScheme(int waveform, int updateMode, int waitMode) {
++        sEinkGlobalUpdateMode = (waveform & (EINK_WAVEFORM_MODE_MASK | EINK_AUTO_MODE_MASK))
++                | (updateMode & EINK_UPDATE_MODE_MASK)
++                | (waitMode & EINK_WAIT_MODE_MASK);
++    }
++
++    public static void setWaveformAndScheme(int updateMode) {
++        sEinkGlobalUpdateMode = updateMode;
++    }
++
++    public static void resetWaveformAndScheme() {
++        sEinkGlobalUpdateMode = EINK_MODE_UNSPECIFIED;
++    }
++
++    public static void setSystemUpdateModeAndScheme(int updateMode, int scheme, int count) {
++        sEinkGlobalUpdateMode = updateMode;
++        sEinkDisplayScheme = scheme;
++    }
++
++    public static void clearSystemUpdateModeAndScheme() {
++        sEinkGlobalUpdateMode = EINK_MODE_UNSPECIFIED;
++        sEinkDisplayScheme = 0;
++    }
++
++    public static void enableScreenUpdate(boolean enable) {
++        sEinkScreenUpdatesEnabled = enable;
++    }
++
++    public static void setDisplayScheme(int scheme) {
++        sEinkDisplayScheme = scheme;
++    }
++
++    public static void waitForUpdateFinished() {
++        // The WAIT bit is carried by the matching invalidation.  A process-wide
++        // blocking wait here would stall unrelated windows and SurfaceFlinger.
++    }
++
++    public static void updateWaveform() {
++        // Waveform tables are owned by the EPDC driver on E70Q10.
++    }
++
++    static int getEinkDisplayScheme() {
++        return sEinkDisplayScheme;
++    }
++
++    static int resolveGlobalEinkUpdateMode() {
++        if (!sEinkScreenUpdatesEnabled) {
++            return EINK_POLICY_VALID | EINK_POLICY_DISABLE;
++        }
++        /*
++         * A process-wide default accompanies every ordinary frame, so it is
++         * never a per-frame application request. Marking it as one disabled the
++         * driver's ghost cleanup for the whole UI.
++         */
++        return EINK_POLICY_VALID | EINK_POLICY_SYSTEM_DEFAULT
++                | getGlobalUpdateMode();
++    }
++
++    /**
++     * Policy for a repaint of the whole window: application launch, activity
++     * switch, menu change and popup dismissal. The previous image is gone, so
++     * one GC16 full update clears any residue the partial waveforms left.
++     */
++    static int resolveWindowRedrawEinkUpdateMode() {
++        return EINK_POLICY_VALID | EINK_POLICY_SYSTEM_DEFAULT
++                | EINK_DEFAULT_FIRST_DRAW_MODE;
++    }
++
++    static int consumeFirstDrawEinkUpdateMode() {
++        final int requested = sEinkFirstDrawUpdateMode;
++        sEinkFirstDrawUpdateMode = EINK_MODE_UNSPECIFIED;
++        if (requested != EINK_MODE_UNSPECIFIED) {
++            return EINK_POLICY_VALID | requested;
++        }
++        return EINK_POLICY_VALID | EINK_POLICY_SYSTEM_DEFAULT
++                | EINK_DEFAULT_FIRST_DRAW_MODE;
++    }
++
++    static int mergeEinkUpdateModes(int current, int incoming) {
++        if (incoming == EINK_MODE_UNSPECIFIED) return current;
++        if (current == EINK_MODE_UNSPECIFIED) return incoming;
++        if ((incoming & EINK_POLICY_DISABLE) != 0) return incoming;
++        if ((current & EINK_POLICY_DISABLE) != 0) return current;
++
++        /*
++         * AUTOMATIC is part of the waveform selector, not an independent
++         * option. Keep it only when the policy that wins waveform priority
++         * requested it; otherwise GC16|FULL could become AUTO|FULL.
++         */
++        final int waveformSelectorMask =
++                EINK_WAVEFORM_MODE_MASK | EINK_AUTO_MODE_AUTOMATIC;
++        final int waveformSelector =
++                einkWaveformPriority(incoming) > einkWaveformPriority(current)
++                ? (incoming & waveformSelectorMask)
++                : (current & waveformSelectorMask);
++        int merged = ((current | incoming) & ~waveformSelectorMask) | waveformSelector;
++        /*
++         * The system-default marker is not a capability to accumulate: as soon
++         * as one contributor is an application request, the merged policy must
++         * be treated as application-supplied.
++         */
++        if ((current & EINK_POLICY_SYSTEM_DEFAULT) == 0
++                || (incoming & EINK_POLICY_SYSTEM_DEFAULT) == 0) {
++            merged &= ~EINK_POLICY_SYSTEM_DEFAULT;
++        }
++        return merged;
++    }
++
++    private static int einkWaveformPriority(int mode) {
++        final int waveform = mode & EINK_WAVEFORM_MODE_MASK;
++        if ((mode & EINK_AUTO_MODE_AUTOMATIC) != 0) return 50;
++        switch (waveform) {
++            case EINK_WAVEFORM_MODE_GC16: return 100;
++            case EINK_WAVEFORM_MODE_GLR16:
++            case EINK_WAVEFORM_MODE_GLD16: return 90;
++            case EINK_WAVEFORM_MODE_GL16: return 80;
++            case EINK_WAVEFORM_MODE_GC4: return 70;
++            case EINK_WAVEFORM_MODE_DU: return 40;
++            case EINK_WAVEFORM_MODE_ANIM:
++            case EINK_WAVEFORM_MODE_A2: return 30;
++            default: return 0;
++        }
++    }
++
+     /**
+      * Do not invalidate views which are not visible and which are not running an animation. They
+      * will not get drawn and they should not set dirty flags as if they will be drawn
+@@ -15386,6 +15720,29 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      *
+      * @param dirty the rectangle representing the bounds of the dirty region
+      */
++    public void invalidate(Rect dirty, int updateMode) {
++        final int scrollX = mScrollX;
++        final int scrollY = mScrollY;
++        invalidateInternal(dirty.left - scrollX, dirty.top - scrollY,
++                dirty.right - scrollX, dirty.bottom - scrollY, true, false, updateMode);
++    }
++
++    public void invalidate(int l, int t, int r, int b, int updateMode) {
++        final int scrollX = mScrollX;
++        final int scrollY = mScrollY;
++        invalidateInternal(l - scrollX, t - scrollY, r - scrollX, b - scrollY,
++                true, false, updateMode);
++    }
++
++    public void invalidate(int updateMode) {
++        invalidate(true, updateMode);
++    }
++
++    void invalidate(boolean invalidateCache, int updateMode) {
++        invalidateInternal(0, 0, mRight - mLeft, mBottom - mTop,
++                invalidateCache, true, updateMode);
++    }
++
+     public void invalidate(Rect dirty) {
+         final int scrollX = mScrollX;
+         final int scrollY = mScrollY;
+@@ -15444,8 +15801,14 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+ 
+     void invalidateInternal(int l, int t, int r, int b, boolean invalidateCache,
+             boolean fullInvalidate) {
++        invalidateInternal(l, t, r, b, invalidateCache, fullInvalidate,
++                EINK_MODE_UNSPECIFIED);
++    }
++
++    private void invalidateInternal(int l, int t, int r, int b, boolean invalidateCache,
++            boolean fullInvalidate, int updateMode) {
+         if (mGhostView != null) {
+-            mGhostView.invalidate(true);
++            mGhostView.invalidate(invalidateCache, updateMode);
+             return;
+         }
+ 
+@@ -15453,6 +15816,9 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+             return;
+         }
+ 
++        final int effectiveUpdateMode = updateMode != EINK_MODE_UNSPECIFIED
++                ? updateMode : resolveInheritedEinkUpdateMode();
++
+         if ((mPrivateFlags & (PFLAG_DRAWN | PFLAG_HAS_BOUNDS)) == (PFLAG_DRAWN | PFLAG_HAS_BOUNDS)
+                 || (invalidateCache && (mPrivateFlags & PFLAG_DRAWING_CACHE_VALID) == PFLAG_DRAWING_CACHE_VALID)
+                 || (mPrivateFlags & PFLAG_INVALIDATED) != PFLAG_INVALIDATED
+@@ -15475,7 +15841,16 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+             if (p != null && ai != null && l < r && t < b) {
+                 final Rect damage = ai.mTmpInvalRect;
+                 damage.set(l, t, r, b);
+-                p.invalidateChild(this, damage);
++                if (effectiveUpdateMode != EINK_MODE_UNSPECIFIED) {
++                    ai.addEinkUpdateMode(effectiveUpdateMode);
++                    if (p instanceof ViewParentEink) {
++                        ((ViewParentEink) p).invalidateChild(this, damage, effectiveUpdateMode);
++                    } else {
++                        p.invalidateChild(this, damage);
++                    }
++                } else {
++                    p.invalidateChild(this, damage);
++                }
+             }
+ 
+             // Damage the entire projection receiver, if necessary.
+@@ -15840,6 +16215,59 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+      * @see #invalidate()
+      * @see #postInvalidateDelayed(long)
+      */
++    public void postInvalidate(final int updateMode) {
++        postInvalidateDelayed(0, updateMode);
++    }
++
++    public void postInvalidate(final int left, final int top, final int right,
++            final int bottom, final int updateMode) {
++        postInvalidateDelayed(0, left, top, right, bottom, updateMode);
++    }
++
++    public void postInvalidateDelayed(long delayMilliseconds, final int updateMode) {
++        final AttachInfo attachInfo = mAttachInfo;
++        if (attachInfo != null) {
++            attachInfo.mHandler.postDelayed(new Runnable() {
++                @Override
++                public void run() {
++                    invalidate(updateMode);
++                }
++            }, delayMilliseconds);
++        }
++    }
++
++    public void postInvalidateDelayed(long delayMilliseconds, final int left, final int top,
++            final int right, final int bottom, final int updateMode) {
++        final AttachInfo attachInfo = mAttachInfo;
++        if (attachInfo != null) {
++            attachInfo.mHandler.postDelayed(new Runnable() {
++                @Override
++                public void run() {
++                    invalidate(left, top, right, bottom, updateMode);
++                }
++            }, delayMilliseconds);
++        }
++    }
++
++    public void postInvalidateOnAnimation(final int updateMode) {
++        postOnAnimation(new Runnable() {
++            @Override
++            public void run() {
++                invalidate(updateMode);
++            }
++        });
++    }
++
++    public void postInvalidateOnAnimation(final int left, final int top, final int right,
++            final int bottom, final int updateMode) {
++        postOnAnimation(new Runnable() {
++            @Override
++            public void run() {
++                invalidate(left, top, right, bottom, updateMode);
++            }
++        });
++    }
++
+     public void postInvalidate() {
+         postInvalidateDelayed(0);
+     }
+@@ -25103,6 +25531,23 @@ public class View implements Drawable.Callback, KeyEvent.Callback,
+             boolean performHapticFeedback(int effectId, boolean always);
+         }
+ 
++        private int mPendingEinkUpdateMode = EINK_MODE_UNSPECIFIED;
++
++        void addEinkUpdateMode(int updateMode) {
++            mPendingEinkUpdateMode = mergeEinkUpdateModes(mPendingEinkUpdateMode,
++                    EINK_POLICY_VALID | updateMode);
++        }
++
++        int consumeEinkUpdateMode() {
++            final int updateMode = mPendingEinkUpdateMode;
++            mPendingEinkUpdateMode = EINK_MODE_UNSPECIFIED;
++            return updateMode;
++        }
++
++        int peekEinkUpdateMode() {
++            return mPendingEinkUpdateMode;
++        }
++
+         /**
+          * InvalidateInfo is used to post invalidate(int, int, int, int) messages
+          * to a Handler. This class contains the target (View) to invalidate and
+diff --git a/frameworks/base/core/java/android/view/ViewGroup.java b/frameworks/base/core/java/android/view/ViewGroup.java
+index ecdfa3fc..4a413025 100644
+--- a/frameworks/base/core/java/android/view/ViewGroup.java
++++ b/frameworks/base/core/java/android/view/ViewGroup.java
+@@ -116,7 +116,8 @@ import java.util.function.Predicate;
+  * @attr ref android.R.styleable#ViewGroup_layoutMode
+  */
+ @UiThread
+-public abstract class ViewGroup extends View implements ViewParent, ViewManager {
++public abstract class ViewGroup extends View
++        implements ViewParent, ViewParentEink, ViewManager {
+     private static final String TAG = "ViewGroup";
+ 
+     private static final boolean DBG = false;
+@@ -5692,6 +5693,28 @@ public abstract class ViewGroup extends View implements ViewParent, ViewManager
+      * @deprecated Use {@link #onDescendantInvalidated(View, View)} instead to observe updates to
+      * draw state in descendants.
+      */
++    /** @hide */
++    @Override
++    public final void invalidateChild(View child, final Rect dirty, int updateMode) {
++        final AttachInfo attachInfo = mAttachInfo;
++        if (attachInfo != null) {
++            attachInfo.addEinkUpdateMode(updateMode);
++        }
++        invalidateChild(child, dirty);
++    }
++
++    /** @hide */
++    @Override
++    public ViewParentEink invalidateChildInParent(final int[] location, final Rect dirty,
++            int updateMode) {
++        final AttachInfo attachInfo = mAttachInfo;
++        if (attachInfo != null) {
++            attachInfo.addEinkUpdateMode(updateMode);
++        }
++        final ViewParent parent = invalidateChildInParent(location, dirty);
++        return parent instanceof ViewParentEink ? (ViewParentEink) parent : null;
++    }
++
+     @Deprecated
+     @Override
+     public final void invalidateChild(View child, final Rect dirty) {
+diff --git a/frameworks/base/core/java/android/view/ViewParentEink.java b/frameworks/base/core/java/android/view/ViewParentEink.java
+new file mode 100644
+index 00000000..d5259625
+--- /dev/null
++++ b/frameworks/base/core/java/android/view/ViewParentEink.java
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (C) 2026 RIDI
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package android.view;
++
++import android.graphics.Rect;
++
++/**
++ * Legacy RIDI E Ink extension of {@link ViewParent}.
++ *
++ * <p>The packed update mode travels with the same dirty rectangle as an
++ * invalidation.  Android 8 keeps the standard coordinate transformation path;
++ * implementations additionally accumulate this one-shot policy for the frame
++ * produced by that invalidation.</p>
++ *
++ * @hide
++ */
++public interface ViewParentEink extends ViewParent {
++    void invalidateChild(View child, Rect dirty, int updateMode);
++
++    ViewParentEink invalidateChildInParent(int[] location, Rect dirty, int updateMode);
++}
+diff --git a/frameworks/base/core/java/android/view/ViewRootImpl.java b/frameworks/base/core/java/android/view/ViewRootImpl.java
+index 7ace841d..b3337d13 100644
+--- a/frameworks/base/core/java/android/view/ViewRootImpl.java
++++ b/frameworks/base/core/java/android/view/ViewRootImpl.java
+@@ -122,7 +122,7 @@ import java.util.concurrent.CountDownLatch;
+  * {@hide}
+  */
+ @SuppressWarnings({"EmptyCatchBlock", "PointlessBooleanExpression"})
+-public final class ViewRootImpl implements ViewParent,
++public final class ViewRootImpl implements ViewParentEink,
+         View.AttachInfo.Callbacks, ThreadedRenderer.DrawCallbacks {
+     private static final String TAG = "ViewRootImpl";
+     private static final boolean DBG = false;
+@@ -332,6 +332,7 @@ public final class ViewRootImpl implements ViewParent,
+     boolean mReportNextDraw;
+     boolean mFullRedrawNeeded;
+     boolean mNewSurfaceNeeded;
++    boolean mEinkFirstDrawPending = true;
+     boolean mHasHadWindowFocus;
+     boolean mLastWasImTarget;
+     boolean mForceNextWindowRelayout;
+@@ -921,6 +922,16 @@ public final class ViewRootImpl implements ViewParent,
+         mAttachInfo.mHardwareAccelerated = false;
+         mAttachInfo.mHardwareAccelerationRequested = false;
+ 
++        /*
++         * The E70Q10 has no GLES2 GPU. Mesa softpipe remains available for
++         * applications that explicitly create EGL contexts, but routing the
++         * normal View hierarchy through HWUI makes a fullscreen textured
++         * frame several seconds slower than CPU Skia.
++         */
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return;
++        }
++
+         // Don't enable hardware acceleration when the application is in compatibility mode
+         if (mTranslator != null) return;
+ 
+@@ -1072,6 +1083,7 @@ public final class ViewRootImpl implements ViewParent,
+     void handleGetNewSurface() {
+         mNewSurfaceNeeded = true;
+         mFullRedrawNeeded = true;
++        mEinkFirstDrawPending = true;
+         scheduleTraversals();
+     }
+ 
+@@ -1194,6 +1206,19 @@ public final class ViewRootImpl implements ViewParent,
+         }
+     }
+ 
++    @Override
++    public void invalidateChild(View child, Rect dirty, int updateMode) {
++        mAttachInfo.addEinkUpdateMode(updateMode);
++        invalidateChild(child, dirty);
++    }
++
++    @Override
++    public ViewParentEink invalidateChildInParent(int[] location, Rect dirty, int updateMode) {
++        mAttachInfo.addEinkUpdateMode(updateMode);
++        invalidateChildInParent(location, dirty);
++        return null;
++    }
++
+     @Override
+     public void invalidateChild(View child, Rect dirty) {
+         invalidateChildInParent(null, dirty);
+@@ -2950,6 +2975,30 @@ public final class ViewRootImpl implements ViewParent,
+                 mChoreographer.getFrameTimeNanos() / TimeUtils.NANOS_PER_MS;
+ 
+         if (!dirty.isEmpty() || mIsAnimating || accessibilityFocusDirty) {
++            int einkUpdateMode = mAttachInfo.consumeEinkUpdateMode();
++            final int globalEinkMode = View.resolveGlobalEinkUpdateMode();
++            if ((globalEinkMode & View.EINK_POLICY_DISABLE) != 0) {
++                einkUpdateMode = globalEinkMode;
++            } else if (mEinkFirstDrawPending) {
++                einkUpdateMode = View.mergeEinkUpdateModes(einkUpdateMode,
++                        View.consumeFirstDrawEinkUpdateMode());
++                mEinkFirstDrawPending = false;
++            } else if (fullRedrawNeeded) {
++                /*
++                 * The entire window is being repainted, so nothing of the
++                 * previous image survives: activity switches, menu changes and
++                 * the repaint that follows a dismissed popup all arrive here.
++                 * Partial waveforms would leave the old content visible, so
++                 * request one full-screen cleanup while still honoring an
++                 * explicit application waveform for this frame.
++                 */
++                einkUpdateMode = View.mergeEinkUpdateModes(einkUpdateMode,
++                        View.resolveWindowRedrawEinkUpdateMode());
++            } else if (einkUpdateMode == View.EINK_MODE_UNSPECIFIED) {
++                einkUpdateMode = globalEinkMode;
++            }
++            surface.setEinkUpdateMode(einkUpdateMode);
++
+             if (mAttachInfo.mThreadedRenderer != null && mAttachInfo.mThreadedRenderer.isEnabled()) {
+                 // If accessibility focus moved, always invalidate the root.
+                 boolean invalidateRoot = accessibilityFocusDirty || mInvalidateRootRequested;
+diff --git a/frameworks/base/core/jni/android_view_Surface.cpp b/frameworks/base/core/jni/android_view_Surface.cpp
+index 494e266d..342def03 100644
+--- a/frameworks/base/core/jni/android_view_Surface.cpp
++++ b/frameworks/base/core/jni/android_view_Surface.cpp
+@@ -508,6 +508,12 @@ static jint nativeSetScalingMode(JNIEnv *env, jclass clazz, jlong nativeObject,
+     return surface->setScalingMode(scalingMode);
+ }
+ 
++static void nativeSetEinkUpdateMode(JNIEnv *env, jclass clazz, jlong nativeObject,
++        jint updateMode) {
++    Surface* surface = reinterpret_cast<Surface*>(nativeObject);
++    surface->setEinkUpdateMode(updateMode);
++}
++
+ static jint nativeForceScopedDisconnect(JNIEnv *env, jclass clazz, jlong nativeObject) {
+     Surface* surface = reinterpret_cast<Surface*>(nativeObject);
+     return surface->disconnect(-1, IGraphicBufferProducer::DisconnectMode::AllLocal);
+@@ -616,6 +622,7 @@ static const JNINativeMethod gSurfaceMethods[] = {
+     {"nativeGetHeight", "(J)I", (void*)nativeGetHeight },
+     {"nativeGetNextFrameNumber", "(J)J", (void*)nativeGetNextFrameNumber },
+     {"nativeSetScalingMode", "(JI)I", (void*)nativeSetScalingMode },
++    {"nativeSetEinkUpdateMode", "(JI)V", (void*)nativeSetEinkUpdateMode },
+     {"nativeForceScopedDisconnect", "(J)I", (void*)nativeForceScopedDisconnect},
+     {"nativeAttachAndQueueBuffer", "(JLandroid/graphics/GraphicBuffer;)I", (void*)nativeAttachAndQueueBuffer},
+ 
+diff --git a/frameworks/base/core/res/res/values/config.xml b/frameworks/base/core/res/res/values/config.xml
+index d1b3fec4..a4435273 100644
+--- a/frameworks/base/core/res/res/values/config.xml
++++ b/frameworks/base/core/res/res/values/config.xml
+@@ -1320,6 +1320,13 @@
+      -->
+     <string name="config_defaultNetworkRecommendationProviderPackage" translatable="false"></string>
+ 
++    <!-- Default system bar policy, applied when Settings.Global.POLICY_CONTROL is
++         not set. Lets a product ship with, for example, a navigation bar that
++         stays hidden until the user swipes up from the bottom edge. Empty keeps
++         the stock behaviour. See com.android.server.policy.PolicyControl for the
++         value format. -->
++    <string name="config_defaultSystemBarPolicy" translatable="false"></string>
++
+     <!-- Whether to enable Hardware FLP overlay which allows Hardware FLP to be
+          replaced by an app at run-time. When disabled, only the
+          config_hardwareFlpPackageName package will be searched for Hardware Flp,
+diff --git a/frameworks/base/core/res/res/values/symbols.xml b/frameworks/base/core/res/res/values/symbols.xml
+index 975737b7..832eb2e3 100644
+--- a/frameworks/base/core/res/res/values/symbols.xml
++++ b/frameworks/base/core/res/res/values/symbols.xml
+@@ -2840,6 +2840,7 @@
+ 
+   <!-- Network Recommendation -->
+   <java-symbol type="string" name="config_defaultNetworkRecommendationProviderPackage" />
++  <java-symbol type="string" name="config_defaultSystemBarPolicy" />
+ 
+   <!-- Whether allow 3rd party apps on internal storage. -->
+   <java-symbol type="bool" name="config_allow3rdPartyAppOnInternal" />
 diff --git a/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java b/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java
 index d714ca83..60f9f1a0 100644
 --- a/frameworks/base/graphics/java/android/graphics/drawable/AnimatedRotateDrawable.java
@@ -130,6 +962,1127 @@ index 8f314c9c..077aff75 100644
  
          boolean enabled = false;
          boolean pressed = false;
+diff --git a/frameworks/base/packages/SettingsProvider/res/values/defaults.xml b/frameworks/base/packages/SettingsProvider/res/values/defaults.xml
+index e9dadc5f..39bd706b 100644
+--- a/frameworks/base/packages/SettingsProvider/res/values/defaults.xml
++++ b/frameworks/base/packages/SettingsProvider/res/values/defaults.xml
+@@ -37,6 +37,9 @@
+     <bool name="def_haptic_feedback">true</bool>
+ 
+     <bool name="def_bluetooth_on">true</bool>
++    <!-- Default Settings.Global.POLICY_CONTROL. Empty keeps stock system bars.
++         See com.android.server.policy.PolicyControl for the value format. -->
++    <string name="def_policy_control" translatable="false"></string>
+     <bool name="def_wifi_display_on">false</bool>
+     <bool name="def_install_non_market_apps">false</bool>
+     <bool name="def_package_verifier_enable">true</bool>
+diff --git a/frameworks/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java b/frameworks/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
+index 06d00be8..58f33fa1 100644
+--- a/frameworks/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
++++ b/frameworks/base/packages/SettingsProvider/src/com/android/providers/settings/DatabaseHelper.java
+@@ -2526,6 +2526,10 @@ class DatabaseHelper extends SQLiteOpenHelper {
+ 
+             loadBooleanSetting(stmt, Settings.Global.BLUETOOTH_ON,
+                     R.bool.def_bluetooth_on);
++            // Lets a product ship with a system bar policy, e.g. an E Ink reader
++            // that hides the navigation bar until the user swipes it up.
++            loadStringSetting(stmt, Settings.Global.POLICY_CONTROL,
++                    R.string.def_policy_control);
+ 
+             // Enable or disable Cell Broadcast SMS
+             loadSetting(stmt, Settings.Global.CDMA_CELL_BROADCAST_SMS,
+diff --git a/frameworks/base/packages/SystemUI/AndroidManifest.xml b/frameworks/base/packages/SystemUI/AndroidManifest.xml
+index 47ffa5c5..59f5f599 100644
+--- a/frameworks/base/packages/SystemUI/AndroidManifest.xml
++++ b/frameworks/base/packages/SystemUI/AndroidManifest.xml
+@@ -72,6 +72,7 @@
+     <!-- Physical hardware -->
+     <uses-permission android:name="android.permission.MANAGE_USB" />
+     <uses-permission android:name="android.permission.DEVICE_POWER" />
++    <uses-permission android:name="android.permission.SHUTDOWN" />
+     <uses-permission android:name="android.permission.MOUNT_UNMOUNT_FILESYSTEMS" />
+     <uses-permission android:name="android.permission.MASTER_CLEAR" />
+     <uses-permission android:name="android.permission.VIBRATE" />
+@@ -223,6 +224,28 @@
+             android:exported="true"
+             />
+ 
++        <activity
++            android:name=".ridi.ReaderQuickPanelActivity"
++            android:label="@string/ridi_quick_panel_title"
++            android:launchMode="singleTask"
++            android:excludeFromRecents="true"
++            android:screenOrientation="portrait"
++            android:theme="@style/Theme.SystemUI.ReaderPanel"
++            android:permission="android.permission.STATUS_BAR_SERVICE"
++            android:exported="true" />
++
++        <activity
++            android:name=".ridi.ReaderNotificationPanelActivity"
++            android:label="@string/ridi_notification_panel_title"
++            android:launchMode="singleTask"
++            android:excludeFromRecents="true"
++            android:screenOrientation="portrait"
++            android:theme="@style/Theme.SystemUI.ReaderPanel"
++            android:exported="false" />
++
++        <!-- The suspend still image is drawn by ReaderScreensaverController as a
++             window inside SystemUI, so it needs no activity. -->
++
+         <!-- Recents depends on every user having their own SystemUI process, so on user switch,
+              ensure that the process is created by starting this service.
+              -->
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_brightness_minus.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_brightness_minus.png
+new file mode 100644
+index 00000000..f8e415b5
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_brightness_minus.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_brightness_plus.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_brightness_plus.png
+new file mode 100644
+index 00000000..b7a2adff
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_brightness_plus.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_frontlight_brightness.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_frontlight_brightness.png
+new file mode 100644
+index 00000000..f9a13be2
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_frontlight_brightness.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_frontlight_color.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_frontlight_color.png
+new file mode 100644
+index 00000000..d1d329b4
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_frontlight_color.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_frontlight.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_frontlight.png
+new file mode 100644
+index 00000000..35fecc9b
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_frontlight.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_notifications.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_notifications.png
+new file mode 100644
+index 00000000..e03e542a
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_notifications.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_power.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_power.png
+new file mode 100644
+index 00000000..aeb9b803
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_power.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_refresh.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_refresh.png
+new file mode 100644
+index 00000000..c91a2814
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_refresh.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_settings.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_settings.png
+new file mode 100644
+index 00000000..36e19183
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_settings.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_wifi.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_wifi.png
+new file mode 100644
+index 00000000..142d7d8b
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_quick_wifi.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_100.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_100.png
+new file mode 100644
+index 00000000..424a25d3
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_100.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_15.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_15.png
+new file mode 100644
+index 00000000..e30e512a
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_15.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_28.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_28.png
+new file mode 100644
+index 00000000..6e829a85
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_28.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_43.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_43.png
+new file mode 100644
+index 00000000..510e9c11
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_43.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_57.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_57.png
+new file mode 100644
+index 00000000..8df29270
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_57.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_71.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_71.png
+new file mode 100644
+index 00000000..3ca3b991
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_71.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_85.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_85.png
+new file mode 100644
+index 00000000..0cf1d362
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_85.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_9.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_9.png
+new file mode 100644
+index 00000000..89efc28b
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_9.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_100.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_100.png
+new file mode 100644
+index 00000000..08c551c0
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_100.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_15.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_15.png
+new file mode 100644
+index 00000000..d4229e70
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_15.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_28.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_28.png
+new file mode 100644
+index 00000000..86edea22
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_28.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_43.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_43.png
+new file mode 100644
+index 00000000..6c802874
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_43.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_57.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_57.png
+new file mode 100644
+index 00000000..bfa1d5a9
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_57.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_71.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_71.png
+new file mode 100644
+index 00000000..5d60ebd2
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_71.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_85.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_85.png
+new file mode 100644
+index 00000000..04ea596c
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_85.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_9.png b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_9.png
+new file mode 100644
+index 00000000..73153b47
+Binary files /dev/null and b/frameworks/base/packages/SystemUI/res/drawable-xhdpi/ridi_stat_sys_battery_c_9.png differ
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_brightness_button.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_brightness_button.xml
+new file mode 100644
+index 00000000..38e5d08a
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_brightness_button.xml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Reconstructed from com.ridi.paper brightness_bg_plus_minus_btn. -->
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle">
++            <solid android:color="#ff000000" />
++            <corners android:radius="4dp" />
++        </shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff" />
++            <corners android:radius="4dp" />
++        </shape>
++    </item>
++</selector>
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_notification_row_background.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_notification_row_background.xml
+new file mode 100644
+index 00000000..f3a2fdd0
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_notification_row_background.xml
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape>
++            <solid android:color="#ffe0e0e0" />
++        </shape>
++    </item>
++    <item>
++        <shape>
++            <solid android:color="#ffffffff" />
++        </shape>
++    </item>
++</selector>
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_panel_background.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_panel_background.xml
+new file mode 100644
+index 00000000..e0139031
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_panel_background.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Reconstructed from com.ridi.paper drawable/panel_bg. -->
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <solid android:color="#ffffffff" />
++    <stroke
++        android:width="1dp"
++        android:color="#ff000000" />
++    <corners android:radius="4dp" />
++    <padding
++        android:left="1dp"
++        android:top="1dp"
++        android:right="1dp"
++        android:bottom="1dp" />
++</shape>
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_quick_cell_background.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_quick_cell_background.xml
+new file mode 100644
+index 00000000..b183071b
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_quick_cell_background.xml
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle">
++            <solid android:color="#ffe6e6e6" />
++        </shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff" />
++        </shape>
++    </item>
++</selector>
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_reader_button.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_reader_button.xml
+new file mode 100644
+index 00000000..5e40f3e6
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_reader_button.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle">
++            <solid android:color="#ffdddddd"/>
++            <stroke android:width="2dp" android:color="#ff111111"/>
++        </shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff"/>
++            <stroke android:width="2dp" android:color="#ff111111"/>
++        </shape>
++    </item>
++</selector>
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_stat_sys_battery.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_stat_sys_battery.xml
+new file mode 100644
+index 00000000..5f894573
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_stat_sys_battery.xml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     Stock RIDI 4.4.2 status bar battery icon.
++     Level thresholds are copied from the stock level-list so the icon changes
++     at exactly the same charge levels as the original firmware.
++-->
++<level-list xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:maxLevel="9" android:drawable="@drawable/ridi_stat_sys_battery_9" />
++    <item android:maxLevel="15" android:drawable="@drawable/ridi_stat_sys_battery_15" />
++    <item android:maxLevel="28" android:drawable="@drawable/ridi_stat_sys_battery_28" />
++    <item android:maxLevel="43" android:drawable="@drawable/ridi_stat_sys_battery_43" />
++    <item android:maxLevel="57" android:drawable="@drawable/ridi_stat_sys_battery_57" />
++    <item android:maxLevel="71" android:drawable="@drawable/ridi_stat_sys_battery_71" />
++    <item android:maxLevel="85" android:drawable="@drawable/ridi_stat_sys_battery_85" />
++    <item android:maxLevel="100" android:drawable="@drawable/ridi_stat_sys_battery_100" />
++</level-list>
+diff --git a/frameworks/base/packages/SystemUI/res/drawable/ridi_stat_sys_battery_charge.xml b/frameworks/base/packages/SystemUI/res/drawable/ridi_stat_sys_battery_charge.xml
+new file mode 100644
+index 00000000..44a403d5
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/drawable/ridi_stat_sys_battery_charge.xml
+@@ -0,0 +1,12 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Stock RIDI 4.4.2 charging battery icon, same thresholds as the idle icon. -->
++<level-list xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:maxLevel="9" android:drawable="@drawable/ridi_stat_sys_battery_c_9" />
++    <item android:maxLevel="15" android:drawable="@drawable/ridi_stat_sys_battery_c_15" />
++    <item android:maxLevel="28" android:drawable="@drawable/ridi_stat_sys_battery_c_28" />
++    <item android:maxLevel="43" android:drawable="@drawable/ridi_stat_sys_battery_c_43" />
++    <item android:maxLevel="57" android:drawable="@drawable/ridi_stat_sys_battery_c_57" />
++    <item android:maxLevel="71" android:drawable="@drawable/ridi_stat_sys_battery_c_71" />
++    <item android:maxLevel="85" android:drawable="@drawable/ridi_stat_sys_battery_c_85" />
++    <item android:maxLevel="100" android:drawable="@drawable/ridi_stat_sys_battery_c_100" />
++</level-list>
+diff --git a/frameworks/base/packages/SystemUI/res/layout/ridi_nav_frontlight.xml b/frameworks/base/packages/SystemUI/res/layout/ridi_nav_frontlight.xml
+new file mode 100644
+index 00000000..8d1c1193
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/layout/ridi_nav_frontlight.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     Navigation bar key that opens the frontlight popup.
++
++     Uses the stock RIDI 4.4.2 frontlight artwork so it matches the rest of the
++     reader UI. keyCode stays 0 because this key runs an action instead of
++     injecting a key event; NavigationBarFragment attaches the click listener.
++-->
++<com.android.systemui.statusbar.policy.KeyButtonView
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:systemui="http://schemas.android.com/apk/res-auto"
++    android:id="@+id/ridi_frontlight"
++    android:layout_width="@dimen/navigation_key_width"
++    android:layout_height="match_parent"
++    android:layout_weight="0"
++    android:scaleType="fitCenter"
++    android:contentDescription="@string/ridi_quick_frontlight"
++    android:src="@drawable/ridi_quick_frontlight"
++    android:paddingTop="8dp"
++    android:paddingBottom="8dp"
++    android:paddingStart="@dimen/navigation_key_padding"
++    android:paddingEnd="@dimen/navigation_key_padding"
++    systemui:playSound="false"
++    />
+diff --git a/frameworks/base/packages/SystemUI/res/layout/ridi_nav_refresh.xml b/frameworks/base/packages/SystemUI/res/layout/ridi_nav_refresh.xml
+new file mode 100644
+index 00000000..17cfb61c
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/layout/ridi_nav_refresh.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     Navigation bar key that forces one full-screen GC16 panel refresh.
++
++     Uses the stock RIDI 4.4.2 refresh artwork. keyCode stays 0 because this key
++     runs an action instead of injecting a key event; NavigationBarFragment
++     attaches the click listener.
++-->
++<com.android.systemui.statusbar.policy.KeyButtonView
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:systemui="http://schemas.android.com/apk/res-auto"
++    android:id="@+id/ridi_refresh"
++    android:layout_width="@dimen/navigation_key_width"
++    android:layout_height="match_parent"
++    android:layout_weight="0"
++    android:scaleType="fitCenter"
++    android:contentDescription="@string/ridi_quick_refresh"
++    android:src="@drawable/ridi_quick_refresh"
++    android:paddingTop="8dp"
++    android:paddingBottom="8dp"
++    android:paddingStart="@dimen/navigation_key_padding"
++    android:paddingEnd="@dimen/navigation_key_padding"
++    systemui:playSound="false"
++    />
+diff --git a/frameworks/base/packages/SystemUI/res/layout/ridi_reader_notification_panel.xml b/frameworks/base/packages/SystemUI/res/layout/ridi_reader_notification_panel.xml
+new file mode 100644
+index 00000000..b7656f9a
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/layout/ridi_reader_notification_panel.xml
+@@ -0,0 +1,88 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:background="@drawable/ridi_panel_background"
++    android:orientation="vertical">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="48dp"
++        android:gravity="center_vertical"
++        android:orientation="horizontal"
++        android:paddingStart="4dp"
++        android:paddingEnd="4dp">
++
++        <ImageView
++            android:layout_width="40dp"
++            android:layout_height="40dp"
++            android:contentDescription="@null"
++            android:padding="8dp"
++            android:src="@drawable/ridi_quick_notifications" />
++
++        <TextView
++            android:layout_width="0dp"
++            android:layout_height="match_parent"
++            android:layout_weight="1"
++            android:gravity="center_vertical"
++            android:paddingStart="7dp"
++            android:text="@string/ridi_notification_panel_title"
++            android:textColor="#ff000000"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++
++        <TextView
++            android:id="@+id/ridi_notification_close"
++            android:layout_width="48dp"
++            android:layout_height="48dp"
++            android:background="@drawable/ridi_quick_cell_background"
++            android:gravity="center"
++            android:text="×"
++            android:textColor="#ff000000"
++            android:textSize="28sp" />
++    </LinearLayout>
++
++    <FrameLayout
++        android:layout_width="match_parent"
++        android:layout_height="500dp"
++        android:background="#ffffffff">
++
++        <ListView
++            android:id="@+id/ridi_notification_list"
++            android:layout_width="match_parent"
++            android:layout_height="match_parent"
++            android:cacheColorHint="#ffffffff"
++            android:divider="#ff999999"
++            android:dividerHeight="1dp"
++            android:drawSelectorOnTop="false"
++            android:fadingEdge="none"
++            android:fastScrollEnabled="false"
++            android:overScrollMode="never"
++            android:scrollbars="none" />
++
++        <TextView
++            android:id="@+id/ridi_notification_empty"
++            android:layout_width="match_parent"
++            android:layout_height="match_parent"
++            android:gravity="center"
++            android:text="@string/ridi_notification_empty"
++            android:textColor="#ff333333"
++            android:textSize="16sp" />
++    </FrameLayout>
++
++    <View
++        android:layout_width="match_parent"
++        android:layout_height="1dp"
++        android:background="#ff777777" />
++
++    <Button
++        android:id="@+id/ridi_notification_clear"
++        android:layout_width="match_parent"
++        android:layout_height="48dp"
++        android:background="@drawable/ridi_quick_cell_background"
++        android:gravity="center"
++        android:text="@string/ridi_notification_clear"
++        android:textColor="#ff000000"
++        android:textSize="15sp"
++        android:textStyle="bold" />
++</LinearLayout>
+diff --git a/frameworks/base/packages/SystemUI/res/layout/ridi_reader_notification_row.xml b/frameworks/base/packages/SystemUI/res/layout/ridi_reader_notification_row.xml
+new file mode 100644
+index 00000000..ed2695b6
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/layout/ridi_reader_notification_row.xml
+@@ -0,0 +1,47 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="56dp"
++    android:background="@drawable/ridi_notification_row_background"
++    android:gravity="center_vertical"
++    android:orientation="horizontal"
++    android:paddingStart="16dp"
++    android:paddingEnd="16dp">
++
++    <ImageView
++        android:id="@+id/ridi_notification_icon"
++        android:layout_width="26dp"
++        android:layout_height="26dp"
++        android:layout_marginEnd="12dp"
++        android:contentDescription="@null"
++        android:scaleType="centerInside" />
++
++    <LinearLayout
++        android:layout_width="0dp"
++        android:layout_height="match_parent"
++        android:layout_weight="1"
++        android:gravity="center_vertical"
++        android:orientation="vertical">
++
++        <TextView
++            android:id="@+id/ridi_notification_title"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:ellipsize="end"
++            android:includeFontPadding="false"
++            android:maxLines="1"
++            android:textColor="#ff000000"
++            android:textSize="17sp"
++            android:textStyle="bold" />
++
++        <TextView
++            android:id="@+id/ridi_notification_text"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:ellipsize="end"
++            android:includeFontPadding="false"
++            android:maxLines="1"
++            android:textColor="#ff444444"
++            android:textSize="13sp" />
++    </LinearLayout>
++</LinearLayout>
+diff --git a/frameworks/base/packages/SystemUI/res/layout/ridi_reader_quick_panel.xml b/frameworks/base/packages/SystemUI/res/layout/ridi_reader_quick_panel.xml
+new file mode 100644
+index 00000000..ac28729c
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/layout/ridi_reader_quick_panel.xml
+@@ -0,0 +1,300 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++  Rebuilt from stock dialog_quick_launcher.xml and activity_brightness.xml:
++  48dp PanelTitle, 13sp icon cells, 53dp frontlight controls.
++-->
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:background="@drawable/ridi_panel_background"
++    android:orientation="vertical">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="48dp"
++        android:gravity="center_vertical"
++        android:orientation="horizontal"
++        android:paddingStart="4dp"
++        android:paddingEnd="4dp">
++
++        <ImageView
++            android:layout_width="40dp"
++            android:layout_height="40dp"
++            android:contentDescription="@null"
++            android:src="@drawable/ridi_quick_settings" />
++
++        <TextView
++            android:layout_width="0dp"
++            android:layout_height="match_parent"
++            android:layout_weight="1"
++            android:gravity="center_vertical"
++            android:paddingStart="7dp"
++            android:text="@string/ridi_quick_panel_title"
++            android:textColor="#ff000000"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++
++        <TextView
++            android:id="@+id/ridi_quick_close"
++            android:layout_width="48dp"
++            android:layout_height="48dp"
++            android:background="@drawable/ridi_quick_cell_background"
++            android:gravity="center"
++            android:text="×"
++            android:textColor="#ff000000"
++            android:textSize="28sp" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="110dp"
++        android:baselineAligned="false"
++        android:orientation="horizontal"
++        android:paddingStart="8dp"
++        android:paddingEnd="8dp">
++
++        <LinearLayout
++            android:id="@+id/ridi_quick_refresh"
++            style="@style/RidiReaderQuickButton">
++            <ImageView
++                android:layout_width="50dp"
++                android:layout_height="50dp"
++                android:contentDescription="@null"
++                android:src="@drawable/ridi_quick_refresh" />
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="0dp"
++                android:layout_weight="1"
++                android:gravity="center"
++                android:text="@string/ridi_quick_refresh"
++                android:textColor="#ff000000"
++                android:textSize="13sp" />
++        </LinearLayout>
++
++        <LinearLayout
++            android:id="@+id/ridi_quick_wifi"
++            style="@style/RidiReaderQuickButton">
++            <ImageView
++                android:layout_width="50dp"
++                android:layout_height="50dp"
++                android:contentDescription="@null"
++                android:src="@drawable/ridi_quick_wifi" />
++            <TextView
++                android:id="@+id/ridi_quick_wifi_label"
++                android:layout_width="match_parent"
++                android:layout_height="0dp"
++                android:layout_weight="1"
++                android:gravity="center"
++                android:maxLines="1"
++                android:text="@string/ridi_quick_wifi"
++                android:textColor="#ff000000"
++                android:textSize="13sp" />
++        </LinearLayout>
++
++        <LinearLayout
++            android:id="@+id/ridi_quick_notifications"
++            style="@style/RidiReaderQuickButton">
++            <ImageView
++                android:layout_width="50dp"
++                android:layout_height="50dp"
++                android:contentDescription="@null"
++                android:padding="10dp"
++                android:src="@drawable/ridi_quick_notifications" />
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="0dp"
++                android:layout_weight="1"
++                android:gravity="center"
++                android:text="@string/ridi_quick_notifications"
++                android:textColor="#ff000000"
++                android:textSize="13sp" />
++        </LinearLayout>
++
++        <LinearLayout
++            android:id="@+id/ridi_open_settings"
++            style="@style/RidiReaderQuickButton">
++            <ImageView
++                android:layout_width="50dp"
++                android:layout_height="50dp"
++                android:contentDescription="@null"
++                android:padding="5dp"
++                android:src="@drawable/ridi_quick_settings" />
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="0dp"
++                android:layout_weight="1"
++                android:gravity="center"
++                android:text="@string/ridi_quick_settings"
++                android:textColor="#ff000000"
++                android:textSize="13sp" />
++        </LinearLayout>
++
++        <LinearLayout
++            android:id="@+id/ridi_power"
++            style="@style/RidiReaderQuickButton">
++            <ImageView
++                android:layout_width="50dp"
++                android:layout_height="50dp"
++                android:contentDescription="@null"
++                android:padding="10dp"
++                android:src="@drawable/ridi_quick_power" />
++            <TextView
++                android:layout_width="match_parent"
++                android:layout_height="0dp"
++                android:layout_weight="1"
++                android:gravity="center"
++                android:text="@string/ridi_quick_power"
++                android:textColor="#ff000000"
++                android:textSize="13sp" />
++        </LinearLayout>
++    </LinearLayout>
++
++    <View
++        android:layout_width="match_parent"
++        android:layout_height="1dp"
++        android:layout_marginStart="19dp"
++        android:layout_marginEnd="19dp"
++        android:background="#ffcccccc" />
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="284dp"
++        android:baselineAligned="false"
++        android:orientation="vertical">
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="141dp"
++            android:gravity="center_horizontal"
++            android:orientation="vertical"
++            android:paddingStart="19dp"
++            android:paddingEnd="19dp">
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="48dp"
++                android:gravity="center"
++                android:orientation="horizontal">
++                <ImageView
++                    android:layout_width="40dp"
++                    android:layout_height="40dp"
++                    android:contentDescription="@null"
++                    android:src="@drawable/ridi_frontlight_brightness" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="match_parent"
++                    android:gravity="center_vertical"
++                    android:text="@string/ridi_quick_brightness"
++                    android:textColor="#ff000000"
++                    android:textSize="18sp"
++                    android:textStyle="bold" />
++            </LinearLayout>
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="58dp"
++                android:gravity="center"
++                android:orientation="horizontal">
++                <ImageButton
++                    android:id="@+id/ridi_brightness_down"
++                    style="@style/RidiReaderStepButton"
++                    android:contentDescription="@null"
++                    android:src="@drawable/ridi_brightness_minus" />
++                <SeekBar
++                    android:id="@+id/ridi_brightness_level"
++                    android:layout_width="0dp"
++                    android:layout_height="48dp"
++                    android:layout_marginStart="5dp"
++                    android:layout_marginEnd="5dp"
++                    android:layout_weight="1"
++                    android:indeterminate="false"
++                    android:splitTrack="false" />
++                <ImageButton
++                    android:id="@+id/ridi_brightness_up"
++                    style="@style/RidiReaderStepButton"
++                    android:contentDescription="@null"
++                    android:src="@drawable/ridi_brightness_plus" />
++            </LinearLayout>
++
++            <TextView
++                android:id="@+id/ridi_brightness_value"
++                android:layout_width="match_parent"
++                android:layout_height="32dp"
++                android:gravity="center"
++                android:includeFontPadding="false"
++                android:textColor="#ff666666"
++                android:textSize="13sp" />
++        </LinearLayout>
++
++        <View
++            android:layout_width="match_parent"
++            android:layout_height="1dp"
++            android:layout_marginStart="19dp"
++            android:layout_marginEnd="19dp"
++            android:background="#ffcccccc" />
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="142dp"
++            android:gravity="center_horizontal"
++            android:orientation="vertical"
++            android:paddingStart="19dp"
++            android:paddingEnd="19dp">
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="48dp"
++                android:gravity="center"
++                android:orientation="horizontal">
++                <ImageView
++                    android:layout_width="40dp"
++                    android:layout_height="40dp"
++                    android:contentDescription="@null"
++                    android:src="@drawable/ridi_frontlight_color" />
++                <TextView
++                    android:layout_width="wrap_content"
++                    android:layout_height="match_parent"
++                    android:gravity="center_vertical"
++                    android:text="@string/ridi_quick_color"
++                    android:textColor="#ff000000"
++                    android:textSize="18sp"
++                    android:textStyle="bold" />
++            </LinearLayout>
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="58dp"
++                android:gravity="center"
++                android:orientation="horizontal">
++                <ImageButton
++                    android:id="@+id/ridi_color_down"
++                    style="@style/RidiReaderStepButton"
++                    android:contentDescription="@null"
++                    android:src="@drawable/ridi_brightness_minus" />
++                <SeekBar
++                    android:id="@+id/ridi_color_level"
++                    android:layout_width="0dp"
++                    android:layout_height="48dp"
++                    android:layout_marginStart="5dp"
++                    android:layout_marginEnd="5dp"
++                    android:layout_weight="1"
++                    android:indeterminate="false"
++                    android:splitTrack="false" />
++                <ImageButton
++                    android:id="@+id/ridi_color_up"
++                    style="@style/RidiReaderStepButton"
++                    android:contentDescription="@null"
++                    android:src="@drawable/ridi_brightness_plus" />
++            </LinearLayout>
++
++            <TextView
++                android:id="@+id/ridi_color_value"
++                android:layout_width="match_parent"
++                android:layout_height="32dp"
++                android:gravity="center"
++                android:includeFontPadding="false"
++                android:textColor="#ff666666"
++                android:textSize="13sp" />
++        </LinearLayout>
++    </LinearLayout>
++</LinearLayout>
+diff --git a/frameworks/base/packages/SystemUI/res/layout/ridi_screensaver.xml b/frameworks/base/packages/SystemUI/res/layout/ridi_screensaver.xml
+new file mode 100644
+index 00000000..ca1b11e4
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/layout/ridi_screensaver.xml
+@@ -0,0 +1,51 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++     Suspend still image for the E Ink reader. Flat white with black text so the
++     panel holds a clean, high-contrast frame with no power.
++-->
++<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:background="@android:color/white">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:layout_gravity="center"
++        android:gravity="center_horizontal"
++        android:orientation="vertical">
++
++        <TextView
++            android:id="@+id/screensaver_clock"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:includeFontPadding="false"
++            android:textColor="@android:color/black"
++            android:textSize="96sp" />
++
++        <TextView
++            android:id="@+id/screensaver_date"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="16dp"
++            android:textColor="@android:color/black"
++            android:textSize="24sp" />
++
++        <TextView
++            android:id="@+id/screensaver_notice"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:text="@string/ridi_screensaver_notice"
++            android:textColor="@android:color/black"
++            android:textSize="24sp" />
++    </LinearLayout>
++
++    <TextView
++        android:id="@+id/screensaver_battery"
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:layout_gravity="bottom|center_horizontal"
++        android:layout_marginBottom="40dp"
++        android:textColor="@android:color/black"
++        android:textSize="20sp" />
++</FrameLayout>
+diff --git a/frameworks/base/packages/SystemUI/res/values/config.xml b/frameworks/base/packages/SystemUI/res/values/config.xml
+index a077fdb6..fe043edd 100644
+--- a/frameworks/base/packages/SystemUI/res/values/config.xml
++++ b/frameworks/base/packages/SystemUI/res/values/config.xml
+@@ -380,6 +380,23 @@
+      have been scrolled off-screen. -->
+     <bool name="config_showNotificationShelf">true</bool>
+ 
++    <!-- Use the flat bitmap battery icon set instead of the drawn Material
++         battery. Intended for E Ink products; phones keep the drawn icon. -->
++    <bool name="config_useStockBatteryIcon">false</bool>
++
++    <!-- Remove the pull-down notification shade completely. Products that set
++         this are expected to offer notifications through their own activity. -->
++    <bool name="config_disableNotificationShade">false</bool>
++
++    <!-- Draw a still suspend image. Only useful on bistable panels that hold
++         the last frame without power. -->
++    <bool name="config_enableReaderScreensaver">false</bool>
++
++    <!-- Paint the status and navigation bars with one fixed colour. Skips the
++         per-mode colours and the cross-fade entirely, which matters on bistable
++         panels where every redraw is a physical display update. -->
++    <bool name="config_fixedColorSystemBars">false</bool>
++
+     <!-- Whether or not the notifications should always fade as they are dismissed. -->
+     <bool name="config_fadeNotificationsOnDismiss">false</bool>
+ 
+diff --git a/frameworks/base/packages/SystemUI/res/values/dimens.xml b/frameworks/base/packages/SystemUI/res/values/dimens.xml
+index 94687de6..4e2d6b69 100644
+--- a/frameworks/base/packages/SystemUI/res/values/dimens.xml
++++ b/frameworks/base/packages/SystemUI/res/values/dimens.xml
+@@ -39,6 +39,10 @@
+     <!-- Width of the battery icon in the status bar. -->
+     <dimen name="status_bar_battery_icon_width">9.5dp</dimen>
+ 
++    <!-- Text size of the battery percentage shown in the status bar. Products
++         that enlarge the status bar clock can match it here. -->
++    <dimen name="status_bar_battery_percent_size">@dimen/qs_time_expanded_size</dimen>
++
+     <!-- The font size for the clock in the status bar. -->
+     <dimen name="status_bar_clock_size">14sp</dimen>
+ 
+diff --git a/frameworks/base/packages/SystemUI/res/values/ridi_reader_strings.xml b/frameworks/base/packages/SystemUI/res/values/ridi_reader_strings.xml
+new file mode 100644
+index 00000000..1dad51be
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/values/ridi_reader_strings.xml
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="ridi_quick_panel_title">빠른 설정</string>
++    <string name="ridi_quick_refresh">새로고침</string>
++    <string name="ridi_quick_frontlight">프론트라이트</string>
++    <string name="ridi_quick_wifi">Wi-Fi</string>
++    <string name="ridi_quick_notifications">알림</string>
++    <string name="ridi_quick_settings">설정</string>
++    <string name="ridi_quick_power">전원</string>
++    <string name="ridi_quick_brightness">밝기</string>
++    <string name="ridi_quick_color">색 온도</string>
++    <string name="ridi_notification_panel_title">알림</string>
++    <string name="ridi_screensaver_notice">화면이 꺼졌습니다</string>
++    <string name="ridi_screensaver_battery">배터리 %1$d%%</string>
++    <string name="ridi_notification_empty">새 알림이 없습니다.</string>
++    <string name="ridi_notification_clear">모두 지우기</string>
++</resources>
+diff --git a/frameworks/base/packages/SystemUI/res/values/ridi_reader_styles.xml b/frameworks/base/packages/SystemUI/res/values/ridi_reader_styles.xml
+new file mode 100644
+index 00000000..ea9b08da
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/res/values/ridi_reader_styles.xml
+@@ -0,0 +1,51 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="ridi_reader_panel_background">#ffffffff</color>
++
++    <style name="Theme.SystemUI.ReaderPanel"
++        parent="@android:style/Theme.DeviceDefault.Light.Dialog.NoActionBar">
++        <item name="android:windowActionModeOverlay">true</item>
++        <item name="android:windowAnimationStyle">@null</item>
++        <item name="android:windowDisablePreview">true</item>
++        <!-- windowBackground takes a drawable/colour reference, never a raw
++             colour string: AAPT2 rejects "#ffffffff" here. -->
++        <item name="android:windowBackground">@color/ridi_reader_panel_background</item>
++        <item name="android:windowNoTitle">true</item>
++        <item name="android:windowIsFloating">true</item>
++        <item name="android:windowIsTranslucent">false</item>
++        <item name="android:backgroundDimEnabled">false</item>
++        <item name="android:windowElevation">0dp</item>
++        <item name="android:windowContentTransitions">false</item>
++        <item name="android:windowActivityTransitions">false</item>
++        <item name="android:colorAccent">#ff111111</item>
++    </style>
++
++    <style name="RidiReaderQuickButton">
++        <item name="android:layout_width">0dp</item>
++        <item name="android:layout_height">110dp</item>
++        <item name="android:layout_weight">1</item>
++        <item name="android:background">@drawable/ridi_quick_cell_background</item>
++        <item name="android:gravity">center</item>
++        <item name="android:orientation">vertical</item>
++        <item name="android:paddingTop">8dp</item>
++        <item name="android:paddingBottom">6dp</item>
++    </style>
++
++    <style name="RidiReaderStepButton">
++        <item name="android:layout_width">53dp</item>
++        <item name="android:layout_height">53dp</item>
++        <item name="android:background">@drawable/ridi_brightness_button</item>
++    </style>
++
++    <style name="RidiReaderBottomButton">
++        <item name="android:layout_width">0dp</item>
++        <item name="android:layout_height">110dp</item>
++        <item name="android:layout_margin">12dp</item>
++        <item name="android:layout_weight">1</item>
++        <item name="android:background">@drawable/ridi_reader_button</item>
++        <item name="android:drawablePadding">10dp</item>
++        <item name="android:gravity">center</item>
++        <item name="android:textColor">#ff111111</item>
++        <item name="android:textSize">23sp</item>
++    </style>
++</resources>
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/BatteryMeterView.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/BatteryMeterView.java
+index c4de63bd..14204ab9 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/BatteryMeterView.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/BatteryMeterView.java
+@@ -19,10 +19,12 @@ import static android.provider.Settings.System.SHOW_BATTERY_PERCENT;
+ 
+ import android.animation.ArgbEvaluator;
+ import android.content.Context;
++import android.content.res.ColorStateList;
+ import android.content.res.Resources;
+ import android.content.res.TypedArray;
+ import android.database.ContentObserver;
+ import android.graphics.Rect;
++import android.graphics.drawable.Drawable;
+ import android.net.Uri;
+ import android.os.Handler;
+ import android.provider.Settings;
+@@ -60,6 +62,16 @@ public class BatteryMeterView extends LinearLayout implements
+     private final ImageView mBatteryIconView;
+     private TextView mBatteryPercentView;
+ 
++    /**
++     * When set, the stock RIDI 4.4.2 bitmap battery icons are shown instead of
++     * the drawn Material battery. E Ink panels render the flat stock artwork
++     * more cleanly than the anti-aliased drawn shape.
++     */
++    private final boolean mUseStockBatteryIcon;
++    private Drawable mStockBatteryIdle;
++    private Drawable mStockBatteryCharging;
++    private boolean mCharging;
++
+     private BatteryController mBatteryController;
+     private SettingObserver mSettingObserver;
+     private int mTextColor;
+@@ -99,7 +111,16 @@ public class BatteryMeterView extends LinearLayout implements
+         mSlotBattery = context.getString(
+                 com.android.internal.R.string.status_bar_battery);
+         mBatteryIconView = new ImageView(context);
+-        mBatteryIconView.setImageDrawable(mDrawable);
++        mUseStockBatteryIcon = getResources().getBoolean(R.bool.config_useStockBatteryIcon);
++        if (mUseStockBatteryIcon) {
++            mStockBatteryIdle = context.getDrawable(R.drawable.ridi_stat_sys_battery);
++            mStockBatteryCharging =
++                    context.getDrawable(R.drawable.ridi_stat_sys_battery_charge);
++            mBatteryIconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
++            updateStockBatteryIcon();
++        } else {
++            mBatteryIconView.setImageDrawable(mDrawable);
++        }
+         final MarginLayoutParams mlp = new MarginLayoutParams(
+                 getResources().getDimensionPixelSize(R.dimen.status_bar_battery_icon_width),
+                 getResources().getDimensionPixelSize(R.dimen.status_bar_battery_icon_height));
+@@ -166,6 +187,8 @@ public class BatteryMeterView extends LinearLayout implements
+         mDrawable.setBatteryLevel(level);
+         mDrawable.setCharging(pluggedIn);
+         mLevel = level;
++        mCharging = pluggedIn;
++        updateStockBatteryIcon();
+         updatePercentText();
+         setContentDescription(
+                 getContext().getString(charging ? R.string.accessibility_battery_level_charging
+@@ -177,9 +200,27 @@ public class BatteryMeterView extends LinearLayout implements
+         mDrawable.setPowerSave(isPowerSave);
+     }
+ 
++    private void updateStockBatteryIcon() {
++        if (!mUseStockBatteryIcon) {
++            return;
++        }
++        final Drawable icon = mCharging ? mStockBatteryCharging : mStockBatteryIdle;
++        icon.setLevel(Math.max(0, Math.min(100, mLevel)));
++        if (mBatteryIconView.getDrawable() != icon) {
++            mBatteryIconView.setImageDrawable(icon);
++        }
++        mBatteryIconView.invalidate();
++    }
++
+     private TextView loadPercentView() {
+-        return (TextView) LayoutInflater.from(getContext())
++        final TextView percentView = (TextView) LayoutInflater.from(getContext())
+                 .inflate(R.layout.battery_percentage_view, null);
++        // The layout's text appearance is the phone default; apply the product's
++        // size here so it is right from the first frame and not only after a
++        // density or font-scale change.
++        percentView.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources()
++                .getDimension(R.dimen.status_bar_battery_percent_size));
++        return percentView;
+     }
+ 
+     private void updatePercentText() {
+@@ -235,7 +276,8 @@ public class BatteryMeterView extends LinearLayout implements
+         scaledLayoutParams.setMargins(0, 0, 0, marginBottom);
+ 
+         mBatteryIconView.setLayoutParams(scaledLayoutParams);
+-        FontSizeUtils.updateFontSize(mBatteryPercentView, R.dimen.qs_time_expanded_size);
++        FontSizeUtils.updateFontSize(mBatteryPercentView,
++                R.dimen.status_bar_battery_percent_size);
+     }
+ 
+     @Override
+@@ -247,6 +289,11 @@ public class BatteryMeterView extends LinearLayout implements
+         int background = getColorForDarkIntensity(intensity, mLightModeBackgroundColor,
+                 mDarkModeBackgroundColor);
+         mDrawable.setColors(foreground, background);
++        if (mUseStockBatteryIcon) {
++            // The stock artwork is a solid silhouette, so tint it to match the
++            // rest of the status bar icons instead of recolouring two layers.
++            mBatteryIconView.setImageTintList(ColorStateList.valueOf(foreground));
++        }
+         setTextColor(foreground);
+     }
+ 
 diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java
 index 86dde54f..a22d1406 100644
 --- a/frameworks/base/packages/SystemUI/src/com/android/systemui/recents/Recents.java
@@ -193,8 +2146,1185 @@ index 86dde54f..a22d1406 100644
          // Ensure the device has been provisioned before allowing the user to interact with
          // recents
          if (!isUserSetup()) {
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderBarSettings.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderBarSettings.java
+new file mode 100644
+index 00000000..a9fbd01e
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderBarSettings.java
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.content.ContentResolver;
++import android.provider.Settings;
++
++/**
++ * Shared definition of the reader's system bar settings.
++ *
++ * The Settings app writes these keys and SystemUI reads them, so the names and
++ * the allowed range live in one place.
++ */
++public final class ReaderBarSettings {
++    /**
++     * How long the transient navigation bar stays visible after a swipe up, in
++     * seconds. Also accepted by the Settings app's picker.
++     */
++    public static final String NAV_BAR_TIMEOUT = "ridi_nav_bar_timeout_seconds";
++
++    public static final int DEFAULT_TIMEOUT_SECONDS = 3;
++    public static final int MIN_TIMEOUT_SECONDS = 1;
++    public static final int MAX_TIMEOUT_SECONDS = 15;
++
++    private ReaderBarSettings() {}
++
++    /** Returns the configured timeout in seconds, clamped to the valid range. */
++    public static int getTimeoutSeconds(ContentResolver resolver) {
++        final int value = Settings.System.getInt(resolver, NAV_BAR_TIMEOUT,
++                DEFAULT_TIMEOUT_SECONDS);
++        return clamp(value);
++    }
++
++    /** Returns the configured timeout in milliseconds. */
++    public static long getTimeoutMillis(ContentResolver resolver) {
++        return getTimeoutSeconds(resolver) * 1000L;
++    }
++
++    public static int clamp(int seconds) {
++        return Math.max(MIN_TIMEOUT_SECONDS, Math.min(MAX_TIMEOUT_SECONDS, seconds));
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderEinkRefresh.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderEinkRefresh.java
+new file mode 100644
+index 00000000..8e982c31
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderEinkRefresh.java
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.graphics.Rect;
++import android.view.View;
++
++/** SystemUI-side use of the stock RIDI/Onyx packed E Ink View ABI. */
++public final class ReaderEinkRefresh {
++    public static final int REAGL_PARTIAL_NOWAIT =
++            View.EINK_WAVEFORM_MODE_REAGL
++                    | View.EINK_UPDATE_MODE_PARTIAL
++                    | View.EINK_WAIT_MODE_NOWAIT;
++
++    private ReaderEinkRefresh() {}
++
++    /**
++     * One clean GC16 pass over the whole panel, for still images.
++     *
++     * Deliberately NOWAIT. A WAIT request makes gralloc call
++     * MXCFB_WAIT_FOR_UPDATE_COMPLETE on SurfaceFlinger's own thread, which takes
++     * about a second on this panel and can hold the kernel's five second
++     * timeout. Blocking there while SystemUI is waiting for its draw to be
++     * acknowledged is enough to trigger an ANR.
++     *
++     * Waiting is also unnecessary: mxc_epdc_fb_blank() flushes every pending
++     * update before it powers the EPDC down, so a frame submitted before the
++     * blank still reaches the glass.
++     */
++    public static final int GC16_FULL_NOWAIT =
++            View.EINK_WAVEFORM_MODE_GC16
++                    | View.EINK_UPDATE_MODE_FULL
++                    | View.EINK_WAIT_MODE_NOWAIT;
++
++    /**
++     * Draws this view with a full GC16 refresh. Used for the suspend image,
++     * where residue would otherwise stay visible for as long as the device
++     * sleeps.
++     */
++    public static void fullRefresh(View view) {
++        if (view == null) {
++            return;
++        }
++        view.setDefaultUpdateMode(GC16_FULL_NOWAIT);
++        view.invalidate(GC16_FULL_NOWAIT);
++    }
++
++    /** Redraws just this view with a REAGL partial update. */
++    public static void invalidate(View view) {
++        if (view == null) {
++            return;
++        }
++        view.setDefaultUpdateMode(REAGL_PARTIAL_NOWAIT);
++        final int width = view.getWidth();
++        final int height = view.getHeight();
++        if (width > 0 && height > 0) {
++            view.invalidate(new Rect(0, 0, width, height), REAGL_PARTIAL_NOWAIT);
++        } else {
++            view.invalidate(REAGL_PARTIAL_NOWAIT);
++        }
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderFrontlightController.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderFrontlightController.java
+new file mode 100644
+index 00000000..215f5d45
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderFrontlightController.java
+@@ -0,0 +1,82 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.content.Context;
++import android.net.Uri;
++import android.os.Bundle;
++import android.util.Log;
++
++/**
++ * Frontlight client for SystemUI.
++ *
++ * SystemUI does not run as android.uid.system, so it must not directly open the
++ * system-owned LM3630A sysfs nodes. Calls are synchronously forwarded through
++ * Settings' signature-protected provider.
++ */
++final class ReaderFrontlightController {
++    private static final String TAG = "ReaderFrontlight";
++    private static final Uri URI =
++            Uri.parse("content://com.android.settings.ridi.frontlight");
++
++    private static final String KEY_VALUE = "value";
++    private static final String KEY_SUCCESS = "success";
++    private static final String KEY_BRIGHTNESS = "brightness";
++    private static final String KEY_MAX_BRIGHTNESS = "max_brightness";
++    private static final String KEY_COLOR = "color";
++    private static final String KEY_MAX_COLOR = "max_color";
++
++    private ReaderFrontlightController() {}
++
++    static State state(Context context) {
++        return call(context, "get_state", 0);
++    }
++
++    static State setBrightness(Context context, int value) {
++        return call(context, "set_brightness", value);
++    }
++
++    static State setColor(Context context, int value) {
++        return call(context, "set_color", value);
++    }
++
++    private static State call(Context context, String method, int value) {
++        try {
++            final Bundle extras = new Bundle();
++            extras.putInt(KEY_VALUE, value);
++            final Bundle result = context.getContentResolver()
++                    .call(URI, method, null, extras);
++            if (result != null) {
++                return new State(
++                        result.getBoolean(KEY_SUCCESS, false),
++                        result.getInt(KEY_BRIGHTNESS, 0),
++                        Math.max(1, result.getInt(KEY_MAX_BRIGHTNESS, 100)),
++                        result.getInt(KEY_COLOR, 0),
++                        Math.max(1, result.getInt(KEY_MAX_COLOR, 10)));
++            }
++        } catch (RuntimeException e) {
++            Log.e(TAG, "Frontlight provider call failed: " + method, e);
++        }
++        return new State(false, 0, 100, 0, 10);
++    }
++
++    static final class State {
++        final boolean success;
++        final int brightness;
++        final int maxBrightness;
++        final int color;
++        final int maxColor;
++
++        State(boolean success, int brightness, int maxBrightness,
++                int color, int maxColor) {
++            this.success = success;
++            this.brightness = brightness;
++            this.maxBrightness = maxBrightness;
++            this.color = color;
++            this.maxColor = maxColor;
++        }
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderNotificationPanelActivity.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderNotificationPanelActivity.java
+new file mode 100644
+index 00000000..4ac9558c
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderNotificationPanelActivity.java
+@@ -0,0 +1,234 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.app.Activity;
++import android.app.Notification;
++import android.app.PendingIntent;
++import android.content.pm.ApplicationInfo;
++import android.content.pm.PackageManager;
++import android.graphics.drawable.Drawable;
++import android.os.Bundle;
++import android.service.notification.StatusBarNotification;
++import android.text.TextUtils;
++import android.util.DisplayMetrics;
++import android.view.LayoutInflater;
++import android.view.View;
++import android.view.ViewGroup;
++import android.view.Window;
++import android.view.WindowManager;
++import android.widget.BaseAdapter;
++import android.widget.Button;
++import android.widget.ImageView;
++import android.widget.ListView;
++import android.widget.TextView;
++
++import com.android.systemui.R;
++import com.android.systemui.SystemUIApplication;
++import com.android.systemui.statusbar.phone.StatusBar;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/**
++ * Static E Ink notification popup.
++ *
++ * Notification RemoteViews are intentionally not inflated here. They may
++ * contain animated drawables, progress indicators and translucent content.
++ * The reader panel displays only a stable icon/title/text snapshot.
++ */
++public class ReaderNotificationPanelActivity extends Activity {
++    private final ArrayList<StatusBarNotification> mNotifications = new ArrayList<>();
++
++    private StatusBar mStatusBar;
++    private NotificationAdapter mAdapter;
++    private ListView mList;
++    private TextView mEmpty;
++    private Button mClear;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        requestWindowFeature(Window.FEATURE_NO_TITLE);
++        getWindow().setWindowAnimations(0);
++        getWindow().setDimAmount(0f);
++        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
++        setContentView(R.layout.ridi_reader_notification_panel);
++        getWindow().getDecorView().setElevation(0f);
++
++        final SystemUIApplication application = (SystemUIApplication) getApplication();
++        mStatusBar = application.getComponent(StatusBar.class);
++        mList = findViewById(R.id.ridi_notification_list);
++        mEmpty = findViewById(R.id.ridi_notification_empty);
++        mClear = findViewById(R.id.ridi_notification_clear);
++        mAdapter = new NotificationAdapter();
++        mList.setAdapter(mAdapter);
++
++        findViewById(R.id.ridi_notification_close).setOnClickListener(v -> finish());
++        mList.setOnItemClickListener((parent, view, position, id) ->
++                openNotification(mNotifications.get(position)));
++        mClear.setOnClickListener(v -> clearNotifications());
++    }
++
++    @Override
++    protected void onStart() {
++        super.onStart();
++        final DisplayMetrics metrics = new DisplayMetrics();
++        getWindowManager().getDefaultDisplay().getMetrics(metrics);
++        final int stockPanelWidth = (int) (510f * metrics.density + 0.5f);
++        getWindow().setLayout(Math.min((int) (metrics.widthPixels * 0.94f), stockPanelWidth),
++                WindowManager.LayoutParams.WRAP_CONTENT);
++    }
++
++    @Override
++    protected void onResume() {
++        super.onResume();
++        overridePendingTransition(0, 0);
++        reloadNotifications();
++    }
++
++    @Override
++    public void finish() {
++        super.finish();
++        overridePendingTransition(0, 0);
++    }
++
++    private void reloadNotifications() {
++        mNotifications.clear();
++        if (mStatusBar != null) {
++            final List<StatusBarNotification> active =
++                    mStatusBar.getReaderActiveNotifications();
++            if (active != null) {
++                mNotifications.addAll(active);
++            }
++        }
++        mAdapter.notifyDataSetChanged();
++        final boolean empty = mNotifications.isEmpty();
++        mList.setVisibility(empty ? View.GONE : View.VISIBLE);
++        mEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
++        mClear.setEnabled(hasClearableNotification());
++    }
++
++    private void clearNotifications() {
++        if (mStatusBar != null) {
++            mStatusBar.clearAllReaderNotifications();
++        }
++        for (int i = mNotifications.size() - 1; i >= 0; i--) {
++            if (mNotifications.get(i).isClearable()) {
++                mNotifications.remove(i);
++            }
++        }
++        mAdapter.notifyDataSetChanged();
++        final boolean empty = mNotifications.isEmpty();
++        mList.setVisibility(empty ? View.GONE : View.VISIBLE);
++        mEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
++        mClear.setEnabled(false);
++    }
++
++    private boolean hasClearableNotification() {
++        for (int i = 0; i < mNotifications.size(); i++) {
++            if (mNotifications.get(i).isClearable()) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    private void openNotification(StatusBarNotification sbn) {
++        final PendingIntent intent = sbn.getNotification().contentIntent;
++        if (intent == null) {
++            return;
++        }
++        try {
++            intent.send();
++            finish();
++        } catch (PendingIntent.CanceledException ignored) {
++        }
++    }
++
++    private CharSequence packageLabel(String packageName) {
++        final PackageManager pm = getPackageManager();
++        try {
++            final ApplicationInfo info = pm.getApplicationInfo(packageName, 0);
++            return pm.getApplicationLabel(info);
++        } catch (PackageManager.NameNotFoundException ignored) {
++            return packageName;
++        }
++    }
++
++    private final class NotificationAdapter extends BaseAdapter {
++        private final LayoutInflater mInflater = LayoutInflater.from(
++                ReaderNotificationPanelActivity.this);
++
++        @Override
++        public int getCount() {
++            return mNotifications.size();
++        }
++
++        @Override
++        public StatusBarNotification getItem(int position) {
++            return mNotifications.get(position);
++        }
++
++        @Override
++        public long getItemId(int position) {
++            return position;
++        }
++
++        @Override
++        public View getView(int position, View convertView, ViewGroup parent) {
++            final RowHolder holder;
++            if (convertView == null) {
++                convertView = mInflater.inflate(
++                        R.layout.ridi_reader_notification_row, parent, false);
++                holder = new RowHolder(convertView);
++                convertView.setTag(holder);
++            } else {
++                holder = (RowHolder) convertView.getTag();
++            }
++
++            final StatusBarNotification sbn = getItem(position);
++            final Notification notification = sbn.getNotification();
++            final Bundle extras = notification.extras != null
++                    ? notification.extras : Bundle.EMPTY;
++            CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
++            CharSequence text = extras.getCharSequence(Notification.EXTRA_TEXT);
++            if (TextUtils.isEmpty(title)) {
++                title = packageLabel(sbn.getPackageName());
++            }
++            if (TextUtils.isEmpty(text)) {
++                text = extras.getCharSequence(Notification.EXTRA_SUB_TEXT);
++            }
++            holder.title.setText(title);
++            holder.text.setText(text);
++            holder.text.setVisibility(TextUtils.isEmpty(text) ? View.GONE : View.VISIBLE);
++
++            Drawable icon = null;
++            if (notification.getSmallIcon() != null) {
++                try {
++                    icon = notification.getSmallIcon().loadDrawable(
++                            ReaderNotificationPanelActivity.this);
++                } catch (RuntimeException ignored) {
++                }
++            }
++            holder.icon.setImageDrawable(icon);
++            holder.icon.setVisibility(icon == null ? View.INVISIBLE : View.VISIBLE);
++            return convertView;
++        }
++    }
++
++    private static final class RowHolder {
++        final ImageView icon;
++        final TextView title;
++        final TextView text;
++
++        RowHolder(View view) {
++            icon = view.findViewById(R.id.ridi_notification_icon);
++            title = view.findViewById(R.id.ridi_notification_title);
++            text = view.findViewById(R.id.ridi_notification_text);
++        }
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderQuickPanelActivity.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderQuickPanelActivity.java
+new file mode 100644
+index 00000000..b3b9d0c2
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderQuickPanelActivity.java
+@@ -0,0 +1,251 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.app.Activity;
++import android.app.AlertDialog;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.net.wifi.WifiManager;
++import android.os.Bundle;
++import android.os.SystemProperties;
++import android.util.DisplayMetrics;
++import android.view.View;
++import android.view.Window;
++import android.view.WindowManager;
++import android.widget.SeekBar;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import com.android.systemui.R;
++
++/**
++ * Opaque, fixed quick panel for E Ink.
++ *
++ * This intentionally does not reuse the draggable QS shade: there are no
++ * flings, expansion animations, translucent scrims, paged tiles or ripples.
++ */
++public class ReaderQuickPanelActivity extends Activity {
++    private static final int BRIGHTNESS_STEP = 5;
++
++    private WifiManager mWifi;
++    private View mWifiButton;
++    private TextView mWifiLabel;
++    private SeekBar mBrightnessBar;
++    private TextView mBrightnessValue;
++    private SeekBar mColorBar;
++    private TextView mColorValue;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        requestWindowFeature(Window.FEATURE_NO_TITLE);
++        getWindow().setWindowAnimations(0);
++        getWindow().setDimAmount(0f);
++        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
++        setContentView(R.layout.ridi_reader_quick_panel);
++        getWindow().getDecorView().setElevation(0f);
++
++        mWifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
++        mWifiButton = findViewById(R.id.ridi_quick_wifi);
++        mWifiLabel = findViewById(R.id.ridi_quick_wifi_label);
++        mBrightnessBar = findViewById(R.id.ridi_brightness_level);
++        mBrightnessValue = findViewById(R.id.ridi_brightness_value);
++        mColorBar = findViewById(R.id.ridi_color_level);
++        mColorValue = findViewById(R.id.ridi_color_value);
++
++        findViewById(R.id.ridi_quick_close).setOnClickListener(v -> finish());
++        findViewById(R.id.ridi_quick_refresh).setOnClickListener(v -> requestFullRefresh());
++        mWifiButton.setOnClickListener(v -> toggleWifi());
++        findViewById(R.id.ridi_quick_notifications).setOnClickListener(v ->
++                openNotifications());
++        findViewById(R.id.ridi_brightness_down).setOnClickListener(v ->
++                changeBrightness(-BRIGHTNESS_STEP));
++        findViewById(R.id.ridi_brightness_up).setOnClickListener(v ->
++                changeBrightness(BRIGHTNESS_STEP));
++        findViewById(R.id.ridi_color_down).setOnClickListener(v -> changeColor(-1));
++        findViewById(R.id.ridi_color_up).setOnClickListener(v -> changeColor(1));
++        findViewById(R.id.ridi_open_settings).setOnClickListener(v -> openSettings());
++        findViewById(R.id.ridi_power).setOnClickListener(v -> confirmShutdown());
++        bindSliders();
++        updateState();
++    }
++
++    @Override
++    protected void onStart() {
++        super.onStart();
++        final DisplayMetrics metrics = new DisplayMetrics();
++        getWindowManager().getDefaultDisplay().getMetrics(metrics);
++        final int stockPanelWidth = (int) (510f * metrics.density + 0.5f);
++        getWindow().setLayout(Math.min((int) (metrics.widthPixels * 0.94f), stockPanelWidth),
++                WindowManager.LayoutParams.WRAP_CONTENT);
++    }
++
++    @Override
++    protected void onResume() {
++        super.onResume();
++        overridePendingTransition(0, 0);
++        updateState();
++    }
++
++    @Override
++    public void finish() {
++        super.finish();
++        overridePendingTransition(0, 0);
++    }
++
++    private void toggleWifi() {
++        if (mWifi == null) {
++            return;
++        }
++        final boolean enable = !mWifi.isWifiEnabled();
++        final boolean accepted = mWifi.setWifiEnabled(enable);
++        mWifiLabel.setText(accepted
++                ? (enable ? "Wi-Fi 켜는 중" : "Wi-Fi 끄는 중")
++                : "Wi-Fi 전환 실패");
++    }
++
++    private void changeBrightness(int delta) {
++        final ReaderFrontlightController.State current =
++                ReaderFrontlightController.state(this);
++        final ReaderFrontlightController.State result =
++                ReaderFrontlightController.setBrightness(
++                        this, current.brightness + delta);
++        if (!result.success) {
++            showFrontlightError();
++        }
++        applyFrontlightState(result);
++    }
++
++    private void changeColor(int delta) {
++        final ReaderFrontlightController.State current =
++                ReaderFrontlightController.state(this);
++        final ReaderFrontlightController.State result =
++                ReaderFrontlightController.setColor(this, current.color + delta);
++        if (!result.success) {
++            showFrontlightError();
++        }
++        applyFrontlightState(result);
++    }
++
++    private void bindSliders() {
++        mBrightnessBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
++            @Override
++            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
++                mBrightnessValue.setText(progress + " / " + seekBar.getMax());
++            }
++
++            @Override
++            public void onStartTrackingTouch(SeekBar seekBar) {}
++
++            @Override
++            public void onStopTrackingTouch(SeekBar seekBar) {
++                final ReaderFrontlightController.State result =
++                        ReaderFrontlightController.setBrightness(
++                                ReaderQuickPanelActivity.this, seekBar.getProgress());
++                if (!result.success) {
++                    showFrontlightError();
++                }
++                applyFrontlightState(result);
++            }
++        });
++        mColorBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
++            @Override
++            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
++                mColorValue.setText(progress + " / " + seekBar.getMax());
++            }
++
++            @Override
++            public void onStartTrackingTouch(SeekBar seekBar) {}
++
++            @Override
++            public void onStopTrackingTouch(SeekBar seekBar) {
++                final ReaderFrontlightController.State result =
++                        ReaderFrontlightController.setColor(
++                                ReaderQuickPanelActivity.this, seekBar.getProgress());
++                if (!result.success) {
++                    showFrontlightError();
++                }
++                applyFrontlightState(result);
++            }
++        });
++    }
++
++    private void updateState() {
++        if (mBrightnessBar == null) {
++            return;
++        }
++        applyFrontlightState(ReaderFrontlightController.state(this));
++
++        if (mWifi != null) {
++            mWifiLabel.setText(mWifi.isWifiEnabled() ? "Wi-Fi 켜짐" : "Wi-Fi 꺼짐");
++        }
++    }
++
++    private void applyFrontlightState(ReaderFrontlightController.State state) {
++        mBrightnessBar.setMax(state.maxBrightness);
++        mBrightnessBar.setProgress(state.brightness);
++        mBrightnessValue.setText(state.brightness + " / " + state.maxBrightness);
++
++        mColorBar.setMax(state.maxColor);
++        mColorBar.setProgress(state.color);
++        mColorValue.setText(state.color + " / " + state.maxColor);
++    }
++
++    private void requestFullRefresh() {
++        final int serial = SystemProperties.getInt(
++                "sys.ridi.epd.full_refresh_seq", 0) + 1;
++        SystemProperties.set("sys.ridi.epd.full_refresh_seq",
++                Integer.toString(serial == 0 ? 1 : serial));
++        getWindow().getDecorView().invalidate();
++    }
++
++    private void openSettings() {
++        final Intent intent = new Intent();
++        intent.setComponent(new ComponentName("com.android.settings",
++                "com.android.settings.ridi.RidiReaderSettingsActivity"));
++        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
++        startActivity(intent);
++        finish();
++    }
++
++    private void openNotifications() {
++        startActivity(new Intent(this, ReaderNotificationPanelActivity.class)
++                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
++                        | Intent.FLAG_ACTIVITY_NO_ANIMATION));
++        finish();
++    }
++
++    private void confirmShutdown() {
++        final AlertDialog dialog = new AlertDialog.Builder(this)
++                .setTitle("전원 끄기")
++                .setMessage("기기의 전원을 끌까요?")
++                .setNegativeButton(android.R.string.cancel, null)
++                .setPositiveButton("전원 끄기", (shutdownDialog, which) -> {
++                    final Intent intent = new Intent(Intent.ACTION_REQUEST_SHUTDOWN);
++                    intent.putExtra(Intent.EXTRA_KEY_CONFIRM, false);
++                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++                    startActivity(intent);
++                })
++                .create();
++        dialog.setOnShowListener(ignored -> {
++            final Window window = dialog.getWindow();
++            if (window != null) {
++                window.setWindowAnimations(0);
++                window.setDimAmount(0f);
++                window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
++                window.getDecorView().setElevation(0f);
++            }
++        });
++        dialog.show();
++    }
++
++    private void showFrontlightError() {
++        Toast.makeText(this, "프론트라이트 장치에 쓸 수 없습니다.",
++                Toast.LENGTH_SHORT).show();
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderScreensaverController.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderScreensaverController.java
+new file mode 100644
+index 00000000..02e596d1
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderScreensaverController.java
+@@ -0,0 +1,153 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.content.ContentResolver;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.graphics.PixelFormat;
++import android.os.BatteryManager;
++import android.text.format.DateFormat;
++import android.util.Log;
++import android.view.LayoutInflater;
++import android.view.View;
++import android.view.WindowManager;
++import android.widget.TextView;
++
++import com.android.systemui.R;
++
++import java.util.Date;
++
++/**
++ * Draws the suspend image once, just before the display is powered down.
++ *
++ * An E Ink panel is bistable: the last frame stays on the glass with no power
++ * and no further drawing. The kernel flushes pending EPDC updates before
++ * FB_BLANK_POWERDOWN, so a frame submitted here is guaranteed to reach the
++ * panel. The update therefore uses GC16 with WAIT, which blocks until the
++ * waveform has finished and leaves a clean, residue-free still image.
++ *
++ * This is a plain window rather than an activity: starting an activity while the
++ * device is going to sleep races with the screen-off path, and there is no
++ * reason to keep a task around for a static picture.
++ */
++public class ReaderScreensaverController {
++    private static final String TAG = "ReaderScreensaver";
++
++    private final Context mContext;
++    private final WindowManager mWindowManager;
++
++    private View mView;
++
++    public ReaderScreensaverController(Context context) {
++        mContext = context;
++        mWindowManager = context.getSystemService(WindowManager.class);
++    }
++
++    /** Called while the screen is still powered, as sleep begins. */
++    public void onStartedGoingToSleep() {
++        final ContentResolver resolver = mContext.getContentResolver();
++        if (!ReaderScreensaverSettings.isEnabled(resolver)) {
++            return;
++        }
++        final int style = ReaderScreensaverSettings.getStyle(resolver);
++        if (style == ReaderScreensaverSettings.STYLE_KEEP_CONTENT) {
++            // Nothing to draw: not updating the panel already keeps the last
++            // frame, which is exactly what this style asks for.
++            return;
++        }
++        show(style);
++    }
++
++    /** Called on wake; removes the still image so the UI is visible again. */
++    public void onStartedWakingUp() {
++        if (mView == null) {
++            return;
++        }
++        try {
++            mWindowManager.removeViewImmediate(mView);
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Could not remove the suspend image", e);
++        }
++        mView = null;
++    }
++
++    private void show(int style) {
++        if (mView != null) {
++            return;
++        }
++        final ContentResolver resolver = mContext.getContentResolver();
++        final View view = LayoutInflater.from(mContext)
++                .inflate(R.layout.ridi_screensaver, null);
++        bind(view, style, resolver);
++
++        final WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
++                WindowManager.LayoutParams.MATCH_PARENT,
++                WindowManager.LayoutParams.MATCH_PARENT,
++                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY,
++                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
++                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
++                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
++                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
++                PixelFormat.OPAQUE);
++        lp.setTitle("ReaderScreensaver");
++        // A dim or animation layer would be baked into the retained image.
++        lp.dimAmount = 0f;
++        lp.windowAnimations = 0;
++
++        try {
++            mWindowManager.addView(view, lp);
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Could not show the suspend image", e);
++            return;
++        }
++        mView = view;
++
++        /*
++         * Submit one full GC16 update and wait for it. The panel keeps this
++         * frame for the whole sleep period, so no further drawing happens.
++         */
++        ReaderEinkRefresh.fullRefresh(view);
++    }
++
++    private void bind(View view, int style, ContentResolver resolver) {
++        final TextView clock = view.findViewById(R.id.screensaver_clock);
++        final TextView date = view.findViewById(R.id.screensaver_date);
++        final TextView battery = view.findViewById(R.id.screensaver_battery);
++        final TextView notice = view.findViewById(R.id.screensaver_notice);
++
++        final boolean wantClock = style == ReaderScreensaverSettings.STYLE_CLOCK
++                && ReaderScreensaverSettings.showClock(resolver);
++        final boolean wantBattery = ReaderScreensaverSettings.showBattery(resolver);
++
++        clock.setVisibility(wantClock ? View.VISIBLE : View.GONE);
++        date.setVisibility(wantClock ? View.VISIBLE : View.GONE);
++        notice.setVisibility(wantClock ? View.GONE : View.VISIBLE);
++        battery.setVisibility(wantBattery ? View.VISIBLE : View.GONE);
++
++        final Date now = new Date();
++        if (wantClock) {
++            clock.setText(DateFormat.getTimeFormat(mContext).format(now));
++            date.setText(DateFormat.getLongDateFormat(mContext).format(now));
++        }
++        if (wantBattery) {
++            battery.setText(mContext.getString(R.string.ridi_screensaver_battery,
++                    readBatteryLevel()));
++        }
++    }
++
++    private int readBatteryLevel() {
++        final Intent status = mContext.registerReceiver(null,
++                new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
++        if (status == null) {
++            return 0;
++        }
++        final int level = status.getIntExtra(BatteryManager.EXTRA_LEVEL, 0);
++        final int scale = status.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
++        return scale > 0 ? Math.round(level * 100f / scale) : 0;
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderScreensaverSettings.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderScreensaverSettings.java
+new file mode 100644
+index 00000000..7ca40bd9
+--- /dev/null
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/ridi/ReaderScreensaverSettings.java
+@@ -0,0 +1,63 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.systemui.ridi;
++
++import android.content.ContentResolver;
++import android.provider.Settings;
++
++/**
++ * Shared definition of the reader's screensaver settings.
++ *
++ * An E Ink panel keeps the last image without power, so the "screensaver" is a
++ * single still frame drawn once while the device suspends. It costs nothing to
++ * leave on screen, unlike an LCD screensaver.
++ *
++ * The Settings app writes these keys and SystemUI reads them.
++ */
++public final class ReaderScreensaverSettings {
++    /** 0 disables the screensaver, 1 enables it. */
++    public static final String ENABLED = "ridi_screensaver_enabled";
++
++    /** One of the {@code STYLE_*} values below. */
++    public static final String STYLE = "ridi_screensaver_style";
++
++    /** Show a clock on the suspend screen. */
++    public static final String SHOW_CLOCK = "ridi_screensaver_show_clock";
++
++    /** Show the battery level on the suspend screen. */
++    public static final String SHOW_BATTERY = "ridi_screensaver_show_battery";
++
++    /** Plain sheet with the "screen is off" notice. */
++    public static final int STYLE_BLANK = 0;
++    /** Large centred clock, the closest match to the stock reader. */
++    public static final int STYLE_CLOCK = 1;
++    /** Keep whatever was on screen and only draw a small footer. */
++    public static final int STYLE_KEEP_CONTENT = 2;
++
++    public static final int DEFAULT_STYLE = STYLE_CLOCK;
++
++    private ReaderScreensaverSettings() {}
++
++    public static boolean isEnabled(ContentResolver resolver) {
++        return Settings.System.getInt(resolver, ENABLED, 1) != 0;
++    }
++
++    public static int getStyle(ContentResolver resolver) {
++        final int style = Settings.System.getInt(resolver, STYLE, DEFAULT_STYLE);
++        if (style < STYLE_BLANK || style > STYLE_KEEP_CONTENT) {
++            return DEFAULT_STYLE;
++        }
++        return style;
++    }
++
++    public static boolean showClock(ContentResolver resolver) {
++        return Settings.System.getInt(resolver, SHOW_CLOCK, 1) != 0;
++    }
++
++    public static boolean showBattery(ContentResolver resolver) {
++        return Settings.System.getInt(resolver, SHOW_BATTERY, 1) != 0;
++    }
++}
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/BarTransitions.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/BarTransitions.java
+index f3c2bc56..76348e53 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/BarTransitions.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/BarTransitions.java
+@@ -141,6 +141,13 @@ public class BarTransitions {
+         private final int mTransparent;
+         private final int mWarning;
+         private final Drawable mGradient;
++        /**
++         * When set, the bar is a single fixed colour: no per-mode colour, no
++         * cross-fade and no repeated self-invalidation. On a bistable panel every
++         * one of those redraws is a real EPDC update, so the mode machinery costs
++         * power and leaves residue without changing what the user sees.
++         */
++        private final boolean mFixedColor;
+ 
+         private int mMode = -1;
+         private boolean mAnimating;
+@@ -158,6 +165,7 @@ public class BarTransitions {
+ 
+         public BarBackgroundDrawable(Context context, int gradientResourceId) {
+             final Resources res = context.getResources();
++            mFixedColor = !DEBUG_COLORS && res.getBoolean(R.bool.config_fixedColorSystemBars);
+             if (DEBUG_COLORS) {
+                 mOpaque = 0xff0000ff;
+                 mSemiTransparent = 0x7f0000ff;
+@@ -165,12 +173,26 @@ public class BarTransitions {
+                 mWarning = 0xffff0000;
+             } else {
+                 mOpaque = context.getColor(R.color.system_bar_background_opaque);
+-                mSemiTransparent = context.getColor(
+-                        com.android.internal.R.color.system_bar_background_semi_transparent);
+-                mTransparent = context.getColor(R.color.system_bar_background_transparent);
+-                mWarning = Utils.getColorAttr(context, android.R.attr.colorError);
++                if (mFixedColor) {
++                    // Only the opaque colour is ever used, so do not resolve the
++                    // translucent variants at all.
++                    mSemiTransparent = mOpaque;
++                    mTransparent = mOpaque;
++                    mWarning = mOpaque;
++                } else {
++                    mSemiTransparent = context.getColor(
++                            com.android.internal.R.color.system_bar_background_semi_transparent);
++                    mTransparent = context.getColor(
++                            R.color.system_bar_background_transparent);
++                    mWarning = Utils.getColorAttr(context, android.R.attr.colorError);
++                }
++            }
++            // The gradient is only drawn while cross-fading, which never happens
++            // with a fixed colour.
++            mGradient = mFixedColor ? null : context.getDrawable(gradientResourceId);
++            if (mFixedColor) {
++                mColor = mOpaque;
+             }
+-            mGradient = context.getDrawable(gradientResourceId);
+         }
+ 
+         @Override
+@@ -206,10 +228,16 @@ public class BarTransitions {
+         @Override
+         protected void onBoundsChange(Rect bounds) {
+             super.onBoundsChange(bounds);
+-            mGradient.setBounds(bounds);
++            if (mGradient != null) {
++                mGradient.setBounds(bounds);
++            }
+         }
+ 
+         public void applyModeBackground(int oldMode, int newMode, boolean animate) {
++            if (mFixedColor) {
++                // Nothing to recolour and nothing to redraw.
++                return;
++            }
+             if (mMode == newMode) return;
+             mMode = newMode;
+             mAnimating = animate;
+@@ -237,6 +265,14 @@ public class BarTransitions {
+ 
+         @Override
+         public void draw(Canvas canvas) {
++            if (mFixedColor) {
++                mPaint.setColor(mOpaque);
++                if (mTintFilter != null) {
++                    mPaint.setColorFilter(mTintFilter);
++                }
++                canvas.drawPaint(mPaint);
++                return;
++            }
+             int targetGradientAlpha = 0, targetColor = 0;
+             if (mMode == MODE_WARNING) {
+                 targetColor = mWarning;
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarFragment.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarFragment.java
+index fbad937d..2496889f 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarFragment.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarFragment.java
+@@ -31,6 +31,7 @@ import android.app.Fragment;
+ import android.app.IActivityManager;
+ import android.app.StatusBarManager;
+ import android.content.BroadcastReceiver;
++import android.content.ComponentName;
+ import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.Intent;
+@@ -46,6 +47,7 @@ import android.os.Handler;
+ import android.os.IBinder;
+ import android.os.Message;
+ import android.os.RemoteException;
++import android.os.SystemProperties;
+ import android.os.UserHandle;
+ import android.provider.Settings;
+ import android.support.annotation.VisibleForTesting;
+@@ -94,6 +96,13 @@ import java.util.Locale;
+ public class NavigationBarFragment extends Fragment implements Callbacks {
+ 
+     public static final String TAG = "NavigationBar";
++
++    /**
++     * Serial consumed once by the display path to force a full-screen GC16
++     * cleanup. Shared with the reader Settings and quick panel.
++     */
++    private static final String RIDI_FULL_REFRESH_PROPERTY =
++            "sys.ridi.epd.full_refresh_seq";
+     private static final boolean DEBUG = false;
+     private static final String EXTRA_DISABLE_STATE = "disabled_state";
+ 
+@@ -401,6 +410,49 @@ public class NavigationBarFragment extends Fragment implements Callbacks {
+         accessibilityButton.setOnClickListener(this::onAccessibilityClick);
+         accessibilityButton.setOnLongClickListener(this::onAccessibilityLongClick);
+         updateAccessibilityServicesState(mAccessibilityManager);
++        mNavigationBarView.getRidiFrontlightButton()
++                .setOnClickListener(this::onRidiFrontlightClick);
++        mNavigationBarView.getRidiRefreshButton()
++                .setOnClickListener(this::onRidiRefreshClick);
++    }
++
++    /**
++     * Products may ship a navigation bar without a recents key, in which case
++     * the dispatcher has no view to ask.
++     */
++    private boolean isRecentsButtonPressed() {
++        final View recents = mNavigationBarView.getRecentsButton().getCurrentView();
++        return recents != null && recents.isPressed();
++    }
++
++    /** Opens the reader's frontlight popup from the navigation bar. */
++    private void onRidiFrontlightClick(View v) {
++        final Intent intent = new Intent();
++        intent.setComponent(new ComponentName("com.android.settings",
++                "com.android.settings.ridi.RidiFrontlightActivity"));
++        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                | Intent.FLAG_ACTIVITY_NO_ANIMATION
++                | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS);
++        try {
++            getContext().startActivityAsUser(intent, UserHandle.CURRENT);
++        } catch (RuntimeException e) {
++            Log.w(TAG, "Could not open the frontlight popup", e);
++        }
++    }
++
++    /**
++     * Asks the display path for one full-screen GC16 cleanup.
++     *
++     * A serial is used rather than a boolean so gralloc consumes each request
++     * exactly once and a failed clear cannot loop.
++     */
++    private void onRidiRefreshClick(View v) {
++        final int serial = SystemProperties.getInt(RIDI_FULL_REFRESH_PROPERTY, 0) + 1;
++        SystemProperties.set(RIDI_FULL_REFRESH_PROPERTY,
++                Integer.toString(serial == 0 ? 1 : serial));
++        if (mNavigationBarView != null) {
++            mNavigationBarView.invalidate();
++        }
+     }
+ 
+     private boolean onHomeTouch(View v, MotionEvent event) {
+@@ -508,8 +560,7 @@ public class NavigationBarFragment extends Fragment implements Callbacks {
+                     // When exiting refresh disabled flags.
+                     mNavigationBarView.setDisabledFlags(mDisabledFlags1, true);
+                     return true;
+-                } else if ((v.getId() == R.id.back)
+-                        && !mNavigationBarView.getRecentsButton().getCurrentView().isPressed()) {
++                } else if ((v.getId() == R.id.back) && !isRecentsButtonPressed()) {
+                     // If we aren't pressing recents right now then they presses
+                     // won't be together, so send the standard long-press action.
+                     sendBackLongPress = true;
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarInflaterView.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarInflaterView.java
+index aaa31b67..270595e7 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarInflaterView.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarInflaterView.java
+@@ -64,6 +64,10 @@ public class NavigationBarInflaterView extends FrameLayout
+     public static final String NAVSPACE = "space";
+     public static final String CLIPBOARD = "clipboard";
+     public static final String KEY = "key";
++    /** Reader key that opens the frontlight popup. */
++    public static final String RIDI_FRONTLIGHT = "ridi_frontlight";
++    /** Reader key that forces one full-screen panel refresh. */
++    public static final String RIDI_REFRESH = "ridi_refresh";
+     public static final String LEFT = "left";
+     public static final String RIGHT = "right";
+ 
+@@ -337,6 +341,10 @@ public class NavigationBarInflaterView extends FrameLayout
+             v = inflater.inflate(R.layout.nav_key_space, parent, false);
+         } else if (CLIPBOARD.equals(button)) {
+             v = inflater.inflate(R.layout.clipboard, parent, false);
++        } else if (RIDI_FRONTLIGHT.equals(button)) {
++            v = inflater.inflate(R.layout.ridi_nav_frontlight, parent, false);
++        } else if (RIDI_REFRESH.equals(button)) {
++            v = inflater.inflate(R.layout.ridi_nav_refresh, parent, false);
+         } else if (button.startsWith(KEY)) {
+             String uri = extractImage(button);
+             int code = extractKeycode(button);
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarView.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarView.java
+index d116bbf3..e55f29f9 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarView.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/NavigationBarView.java
+@@ -217,6 +217,11 @@ public class NavigationBarView extends FrameLayout implements PluginListener<Nav
+         mButtonDispatchers.put(R.id.back, new ButtonDispatcher(R.id.back));
+         mButtonDispatchers.put(R.id.home, new ButtonDispatcher(R.id.home));
+         mButtonDispatchers.put(R.id.recent_apps, new ButtonDispatcher(R.id.recent_apps));
++        // Reader-only keys. Absent from the phone layout, in which case the
++        // dispatcher simply has no view to drive.
++        mButtonDispatchers.put(R.id.ridi_frontlight,
++                new ButtonDispatcher(R.id.ridi_frontlight));
++        mButtonDispatchers.put(R.id.ridi_refresh, new ButtonDispatcher(R.id.ridi_refresh));
+         mButtonDispatchers.put(R.id.menu, new ButtonDispatcher(R.id.menu));
+         mButtonDispatchers.put(R.id.ime_switcher, new ButtonDispatcher(R.id.ime_switcher));
+         mButtonDispatchers.put(R.id.accessibility_button,
+@@ -276,6 +281,14 @@ public class NavigationBarView extends FrameLayout implements PluginListener<Nav
+         return mButtonDispatchers.get(R.id.recent_apps);
+     }
+ 
++    public ButtonDispatcher getRidiFrontlightButton() {
++        return mButtonDispatchers.get(R.id.ridi_frontlight);
++    }
++
++    public ButtonDispatcher getRidiRefreshButton() {
++        return mButtonDispatchers.get(R.id.ridi_refresh);
++    }
++
+     public ButtonDispatcher getMenuButton() {
+         return mButtonDispatchers.get(R.id.menu);
+     }
 diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java
-index 75771364..fa126f42 100644
+index 75771364..eea579b4 100644
 --- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java
 +++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/PanelView.java
 @@ -24,6 +24,7 @@ import android.content.Context;
@@ -214,30 +3344,22 @@ index 75771364..fa126f42 100644
      private long mDownTime;
      private float mMinExpandHeight;
      private LockscreenGestureLogger mLockscreenGestureLogger = new LockscreenGestureLogger();
-@@ -240,6 +243,22 @@ public abstract class PanelView extends FrameLayout {
+@@ -240,6 +243,14 @@ public abstract class PanelView extends FrameLayout {
  
      @Override
      public boolean onTouchEvent(MotionEvent event) {
 +        if (EINK_MODE) {
-+            switch (event.getActionMasked()) {
-+                case MotionEvent.ACTION_DOWN:
-+                    mPanelClosedOnDown = isFullyCollapsed();
-+                    return true;
-+                case MotionEvent.ACTION_UP:
-+                    if (mPanelClosedOnDown) {
-+                        expand(false /* animate */);
-+                    }
-+                    return true;
-+                case MotionEvent.ACTION_CANCEL:
-+                case MotionEvent.ACTION_MOVE:
-+                default:
-+                    return true;
-+            }
++            /*
++             * The reader exposes notifications and controls as explicit
++             * opaque popup activities. Consume the status-bar touch stream so
++             * neither a swipe nor a tap can expand the phone shade.
++             */
++            return true;
 +        }
          if (mInstantExpanding || mTouchDisabled
                  || (mMotionAborted && event.getActionMasked() != MotionEvent.ACTION_DOWN)) {
              return false;
-@@ -711,6 +730,13 @@ public abstract class PanelView extends FrameLayout {
+@@ -711,6 +722,13 @@ public abstract class PanelView extends FrameLayout {
  
      protected void flingToHeight(float vel, boolean expand, float target,
              float collapseSpeedUpFactor, boolean expandBecauseOfFalsing) {
@@ -251,6 +3373,199 @@ index 75771364..fa126f42 100644
          // Hack to make the expand transition look nice when clear all button is visible - we make
          // the animation only to the last notification, and then jump to the maximum panel height so
          // clear all just fades in and the decelerating motion is towards the last notification.
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/StatusBar.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/StatusBar.java
+index ada98b7a..dd738a17 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/StatusBar.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/phone/StatusBar.java
+@@ -55,6 +55,7 @@ import android.app.admin.DevicePolicyManager;
+ import android.content.BroadcastReceiver;
+ import android.content.ComponentCallbacks2;
+ import android.content.ComponentName;
++import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.IntentFilter;
+@@ -197,6 +198,8 @@ import com.android.systemui.recents.events.EventBus;
+ import com.android.systemui.recents.events.activity.AppTransitionFinishedEvent;
+ import com.android.systemui.recents.events.activity.UndockingTaskEvent;
+ import com.android.systemui.recents.misc.SystemServicesProxy;
++import com.android.systemui.ridi.ReaderBarSettings;
++import com.android.systemui.ridi.ReaderScreensaverController;
+ import com.android.systemui.stackdivider.Divider;
+ import com.android.systemui.stackdivider.WindowManagerProxy;
+ import com.android.systemui.statusbar.ActivatableNotificationView;
+@@ -342,6 +345,23 @@ public class StatusBar extends SystemUI implements DemoMode,
+             View.STATUS_BAR_TRANSIENT | View.NAVIGATION_BAR_TRANSIENT;
+     private static final long AUTOHIDE_TIMEOUT_MS = 3000;
+ 
++    /**
++     * How long a transient system bar stays on screen after a swipe, in
++     * milliseconds. Read from
++     * {@link com.android.systemui.ridi.ReaderBarSettings#NAV_BAR_TIMEOUT} so the
++     * reader's Settings app can tune it, and clamped to a sane range.
++     */
++    private long mAutohideTimeoutMs = AUTOHIDE_TIMEOUT_MS;
++
++    /** Product flag: the pull-down notification shade is removed entirely. */
++    private boolean mNotificationShadeDisabled;
++
++    /**
++     * Draws the still image the E Ink panel keeps while suspended. Null on
++     * products without a bistable panel.
++     */
++    private ReaderScreensaverController mScreensaverController;
++
+     /** The minimum delay in ms between reports of notification visibility. */
+     private static final int VISIBILITY_REPORT_MIN_DELAY_MS = 500;
+ 
+@@ -810,6 +830,11 @@ public class StatusBar extends SystemUI implements DemoMode,
+         updateDisplaySize();
+ 
+         Resources res = mContext.getResources();
++        mNotificationShadeDisabled = res.getBoolean(R.bool.config_disableNotificationShade);
++        if (res.getBoolean(R.bool.config_enableReaderScreensaver)) {
++            mScreensaverController = new ReaderScreensaverController(mContext);
++        }
++        initAutohideTimeout();
+         mScrimSrcModeEnabled = res.getBoolean(R.bool.config_status_bar_scrim_behind_use_src);
+         mClearAllEnabled = res.getBoolean(R.bool.config_enableNotificationsClearAll);
+         mAlwaysExpandNonGroupedNotification =
+@@ -2974,6 +2999,12 @@ public class StatusBar extends SystemUI implements DemoMode,
+     }
+ 
+     boolean panelsEnabled() {
++        if (mNotificationShadeDisabled) {
++            // Reader products replace the pull-down shade with a dedicated
++            // notification activity, so the shade must never expand: not by
++            // swipe, not by expandNotificationsPanel(), not by a peek.
++            return false;
++        }
+         return (mDisabled1 & StatusBarManager.DISABLE_EXPAND) == 0 && !ONLY_CORE_APPS;
+     }
+ 
+@@ -3362,6 +3393,25 @@ public class StatusBar extends SystemUI implements DemoMode,
+         }
+     }
+ 
++    /**
++     * Tracks the reader's transient-bar timeout setting so a change applies to
++     * the next swipe without a reboot.
++     */
++    private void initAutohideTimeout() {
++        final ContentResolver resolver = mContext.getContentResolver();
++        mAutohideTimeoutMs = ReaderBarSettings.getTimeoutMillis(resolver);
++        resolver.registerContentObserver(
++                Settings.System.getUriFor(ReaderBarSettings.NAV_BAR_TIMEOUT),
++                false,
++                new ContentObserver(mHandler) {
++                    @Override
++                    public void onChange(boolean selfChange) {
++                        mAutohideTimeoutMs = ReaderBarSettings.getTimeoutMillis(resolver);
++                    }
++                },
++                UserHandle.USER_ALL);
++    }
++
+     private void resumeSuspendedAutohide() {
+         if (mAutohideSuspended) {
+             scheduleAutohide();
+@@ -3382,7 +3432,7 @@ public class StatusBar extends SystemUI implements DemoMode,
+ 
+     private void scheduleAutohide() {
+         cancelAutohide();
+-        mHandler.postDelayed(mAutohide, AUTOHIDE_TIMEOUT_MS);
++        mHandler.postDelayed(mAutohide, mAutohideTimeoutMs);
+     }
+ 
+     void checkUserAutohide(View v, MotionEvent event) {
+@@ -5182,10 +5232,18 @@ public class StatusBar extends SystemUI implements DemoMode,
+         public void onStartedGoingToSleep() {
+             notifyHeadsUpGoingToSleep();
+             dismissVolumeDialog();
++            // The screen is still powered here, so this frame reaches the panel
++            // before the EPDC is blanked and stays there while suspended.
++            if (mScreensaverController != null) {
++                mScreensaverController.onStartedGoingToSleep();
++            }
+         }
+ 
+         @Override
+         public void onStartedWakingUp() {
++            if (mScreensaverController != null) {
++                mScreensaverController.onStartedWakingUp();
++            }
+             mDeviceInteractive = true;
+             mStackScroller.setAnimationsEnabled(true);
+             mVisualStabilityManager.setScreenOn(true);
+@@ -7459,6 +7517,30 @@ public class StatusBar extends SystemUI implements DemoMode,
+         return mNotificationPanel;
+     }
+ 
++    /** Snapshot used by the E70Q10's non-draggable notification popup. */
++    public ArrayList<StatusBarNotification> getReaderActiveNotifications() {
++        final ArrayList<StatusBarNotification> result = new ArrayList<>();
++        if (mNotificationData == null) {
++            return result;
++        }
++        final ArrayList<Entry> entries = mNotificationData.getActiveNotifications();
++        for (int i = 0; i < entries.size(); i++) {
++            final Entry entry = entries.get(i);
++            if (entry != null && entry.notification != null) {
++                result.add(entry.notification);
++            }
++        }
++        return result;
++    }
++
++    /** Clear dismissible notifications without running the phone shade's swipe animations. */
++    public void clearAllReaderNotifications() {
++        try {
++            mBarService.onClearAllNotifications(mCurrentUserId);
++        } catch (Exception ignored) {
++        }
++    }
++
+     @Override
+     public void startAssist(Bundle args) {
+         if (mAssistManager != null) {
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/Clock.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/Clock.java
+index f0af77de..7f10d638 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/Clock.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/policy/Clock.java
+@@ -33,6 +33,7 @@ import android.os.SystemClock;
+ import android.os.UserHandle;
+ import android.text.Spannable;
+ import android.text.SpannableStringBuilder;
++import android.text.TextUtils;
+ import android.text.format.DateFormat;
+ import android.text.style.CharacterStyle;
+ import android.text.style.RelativeSizeSpan;
+@@ -46,6 +47,7 @@ import com.android.systemui.Dependency;
+ import com.android.systemui.FontSizeUtils;
+ import com.android.systemui.R;
+ import com.android.systemui.SysUiServiceProvider;
++import com.android.systemui.ridi.ReaderEinkRefresh;
+ import com.android.systemui.statusbar.CommandQueue;
+ import com.android.systemui.statusbar.phone.StatusBarIconController;
+ import com.android.systemui.statusbar.policy.ConfigurationController.ConfigurationListener;
+@@ -201,8 +203,16 @@ public class Clock extends TextView implements DemoMode, Tunable, CommandQueue.C
+     final void updateClock() {
+         if (mDemoMode) return;
+         mCalendar.setTimeInMillis(System.currentTimeMillis());
+-        setText(getSmallTime());
++        final CharSequence time = getSmallTime();
++        final boolean timeChanged = !TextUtils.equals(time, getText());
++        setText(time);
+         setContentDescription(mContentDescriptionFormat.format(mCalendar.getTime()));
++        if (timeChanged) {
++            // The status bar is otherwise static, so the panel keeps showing the
++            // previous minute until something else repaints. Ask for a REAGL
++            // partial update whenever the displayed time actually changes.
++            ReaderEinkRefresh.invalidate(this);
++        }
+     }
+ 
+     @Override
 diff --git a/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java b/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java
 index a3ad971b..b3a08da0 100644
 --- a/frameworks/base/services/core/java/com/android/server/am/ActivityRecord.java
@@ -286,10 +3601,88 @@ index a3ad971b..b3a08da0 100644
          final Configuration displayConfig =
                  mStackSupervisor.getDisplayOverrideConfiguration(displayId);
 diff --git a/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java b/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java
-index 7407fd4b..b4b0c76c 100644
+index 7407fd4b..673dc708 100644
 --- a/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java
 +++ b/frameworks/base/services/core/java/com/android/server/policy/PhoneWindowManager.java
-@@ -4063,6 +4063,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -357,6 +357,8 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+             "com.android.systemui.screenshot.TakeScreenshotService";
+     private static final String SYSUI_SCREENSHOT_ERROR_RECEIVER =
+             "com.android.systemui.screenshot.ScreenshotServiceErrorReceiver";
++    private static final ComponentName RIDI_QUICK_PANEL_COMPONENT = new ComponentName(
++            SYSUI_PACKAGE, "com.android.systemui.ridi.ReaderQuickPanelActivity");
+ 
+     /**
+      * Keyguard stuff
+@@ -770,6 +772,20 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+     private boolean mAccessibilityTvKey1Pressed;
+     private boolean mAccessibilityTvKey2Pressed;
+     private boolean mAccessibilityTvScheduled;
++    private boolean mRidiQuickKeyLongPressed;
++
++    private final Runnable mRidiQuickKeyLongPress = new Runnable() {
++        @Override
++        public void run() {
++            mRidiQuickKeyLongPressed = true;
++            final Intent intent = new Intent();
++            intent.setComponent(RIDI_QUICK_PANEL_COMPONENT);
++            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
++                    | Intent.FLAG_ACTIVITY_CLEAR_TOP
++                    | Intent.FLAG_ACTIVITY_NO_ANIMATION);
++            startActivityAsUser(intent, UserHandle.CURRENT_OR_SELF);
++        }
++    };
+ 
+     /* The number of steps between min and max brightness */
+     private static final int BRIGHTNESS_STEPS = 10;
+@@ -3310,6 +3326,28 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+         final boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
+         final boolean canceled = event.isCanceled();
+ 
++        /*
++         * The physical E70Q10 quick key has its own F1 scan code. Delay its
++         * short action until key-up so a long press never leaks a BACK down
++         * event into the foreground reader application.
++         */
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)
++                && keyCode == KeyEvent.KEYCODE_F1) {
++            if (down && repeatCount == 0) {
++                mRidiQuickKeyLongPressed = false;
++                mHandler.removeCallbacks(mRidiQuickKeyLongPress);
++                mHandler.postDelayed(mRidiQuickKeyLongPress,
++                        ViewConfiguration.getLongPressTimeout());
++            } else if (!down) {
++                mHandler.removeCallbacks(mRidiQuickKeyLongPress);
++                if (!mRidiQuickKeyLongPressed && !canceled) {
++                    injectRidiBackKey();
++                }
++                mRidiQuickKeyLongPressed = false;
++            }
++            return -1;
++        }
++
+         if (DEBUG_INPUT) {
+             Log.d(TAG, "interceptKeyTi keyCode=" + keyCode + " down=" + down + " repeatCount="
+                     + repeatCount + " keyguardOn=" + keyguardOn + " mHomePressed=" + mHomePressed
+@@ -3814,6 +3852,18 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+         return 0;
+     }
+ 
++    private void injectRidiBackKey() {
++        final long now = SystemClock.uptimeMillis();
++        InputManager.getInstance().injectInputEvent(
++                new KeyEvent(now, now, KeyEvent.ACTION_DOWN,
++                        KeyEvent.KEYCODE_BACK, 0),
++                InputManager.INJECT_INPUT_EVENT_MODE_ASYNC);
++        InputManager.getInstance().injectInputEvent(
++                new KeyEvent(now, now, KeyEvent.ACTION_UP,
++                        KeyEvent.KEYCODE_BACK, 0),
++                InputManager.INJECT_INPUT_EVENT_MODE_ASYNC);
++    }
++
+     /**
+      * TV only: recognizes a remote control gesture for capturing a bug report.
+      */
+@@ -4063,6 +4113,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
      }
  
      private void preloadRecentApps() {
@@ -299,7 +3692,7 @@ index 7407fd4b..b4b0c76c 100644
          mPreloadedRecentApps = true;
          StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
          if (statusbar != null) {
-@@ -4081,6 +4084,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -4081,6 +4134,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
      }
  
      private void toggleRecentApps() {
@@ -309,7 +3702,7 @@ index 7407fd4b..b4b0c76c 100644
          mPreloadedRecentApps = false; // preloading no longer needs to be canceled
          StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
          if (statusbar != null) {
-@@ -4095,6 +4101,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+@@ -4095,6 +4151,9 @@ public class PhoneWindowManager implements WindowManagerPolicy {
      }
  
      private void showRecentApps(boolean triggeredFromAltTab, boolean fromHome) {
@@ -319,6 +3712,54 @@ index 7407fd4b..b4b0c76c 100644
          mPreloadedRecentApps = false; // preloading no longer needs to be canceled
          StatusBarManagerInternal statusbar = getStatusBarManagerInternal();
          if (statusbar != null) {
+@@ -7061,6 +7120,17 @@ public class PhoneWindowManager implements WindowManagerPolicy {
+ 
+     @Override
+     public int rotationForOrientationLw(int orientation, int lastRotation) {
++        /*
++         * The E70Q10 EPDC is physically exposed as a 1872x1404 landscape
++         * framebuffer, while the product is permanently used as a
++         * 1404x1872 portrait reader. Treat ROT_270 as the device's immutable
++         * natural orientation: ignore sensor state and application-requested
++         * landscape modes instead of performing runtime rotation transitions.
++         */
++        if (SystemProperties.getBoolean("ro.ridi.eink_mode", false)) {
++            return mPortraitRotation;
++        }
++
+         if (false) {
+             Slog.v(TAG, "rotationForOrientationLw(orient="
+                         + orientation + ", last=" + lastRotation
+diff --git a/frameworks/base/services/core/java/com/android/server/policy/PolicyControl.java b/frameworks/base/services/core/java/com/android/server/policy/PolicyControl.java
+index dbafc424..b74d63a0 100644
+--- a/frameworks/base/services/core/java/com/android/server/policy/PolicyControl.java
++++ b/frameworks/base/services/core/java/com/android/server/policy/PolicyControl.java
+@@ -20,6 +20,7 @@ import android.app.ActivityManager;
+ import android.content.Context;
+ import android.os.UserHandle;
+ import android.provider.Settings;
++import android.text.TextUtils;
+ import android.util.ArraySet;
+ import android.util.Slog;
+ import android.view.View;
+@@ -117,6 +118,17 @@ public class PolicyControl {
+             value = Settings.Global.getStringForUser(context.getContentResolver(),
+                     Settings.Global.POLICY_CONTROL,
+                     UserHandle.USER_CURRENT);
++            if (TextUtils.isEmpty(value)) {
++                /*
++                 * Products may ship a default bar policy, for example an E Ink
++                 * reader that keeps the navigation bar hidden until the user
++                 * swipes up. Using a resource rather than a seeded setting means
++                 * it also applies to devices whose settings database already
++                 * exists, and it still lets the setting override it later.
++                 */
++                value = context.getResources().getString(
++                        com.android.internal.R.string.config_defaultSystemBarPolicy);
++            }
+             if (sSettingValue != null && sSettingValue.equals(value)) return;
+             setFilters(value);
+             sSettingValue = value;
 diff --git a/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java b/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java
 index 0c62be6e..eea98798 100644
 --- a/frameworks/base/services/core/java/com/android/server/wm/AppTransition.java
@@ -374,4 +3815,19 @@ index 0c62be6e..eea98798 100644
          Animation a;
          if (isKeyguardGoingAwayTransit(transit) && enter) {
              a = loadKeyguardExitAnimation(transit);
-
+diff --git a/frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java b/frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java
+index 3b5939ae..c593d54f 100644
+--- a/frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java
++++ b/frameworks/base/services/core/java/com/android/server/wm/WindowManagerService.java
+@@ -311,7 +311,10 @@ public class WindowManagerService extends IWindowManager.Stub
+      * If true, the window manager will do its own custom freezing and general
+      * management of the screen during rotation.
+      */
+-    static final boolean CUSTOM_SCREEN_ROTATION = true;
++    // E70Q10: the GLES1-only recovery renderer cannot create the screenshot
++    // surface used by Android's rotation animation. Apply the new projection
++    // directly; E Ink also must not animate or retain transitional surfaces.
++    static final boolean CUSTOM_SCREEN_ROTATION = false;
+ 
+     // Maximum number of milliseconds to wait for input devices to be enumerated before
+     // proceding with safe mode detection.

@@ -1,0 +1,2750 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] imx display: EPDC waveform policy, damage and local composition
+Apply from the Android source root:
+  patch -p1 < device/ridi/e70q10/patches/0011-imx-display-eink-policy.patch
+diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp b/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
+index a7430dd..52112e2 100644
+--- a/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
++++ b/vendor/nxp-opensource/imx/display/gralloc_v1/framebuffer.cpp
+@@ -21,6 +21,7 @@
+ 
+ #include <cutils/ashmem.h>
+ #include <cutils/log.h>
++#include <cutils/properties.h>
+ 
+ #include <hardware/hardware.h>
+ #include <hardware/gralloc.h>
+@@ -30,6 +31,8 @@
+ #include <sys/ioctl.h>
+ #include <string.h>
+ #include <stdlib.h>
++#include <time.h>
++#include <algorithm>
+ 
+ #include <cutils/log.h>
+ #include <cutils/atomic.h>
+@@ -57,6 +60,34 @@
+ #define EPDC_WAITCOUNT 10
+ #define FB_NAME_PATH "/sys/class/graphics/fb0/name"
+ #define EPDC_DISPLAY_STR "epdc"
++#define E70Q10_WAVEFORM_INIT 0
++#define E70Q10_WAVEFORM_DU 1
++#define E70Q10_WAVEFORM_GC16 2
++#define E70Q10_WAVEFORM_GL16 3
++#define E70Q10_WAVEFORM_REAGL 4
++#define E70Q10_WAVEFORM_REAGLD 5
++#define E70Q10_WAVEFORM_A2 6
++#define E70Q10_WAVEFORM_AUTO 257
++
++#define EINK_WAVEFORM_MASK 0x0f
++#define EINK_AUTO_MODE_AUTOMATIC 0x10
++#define EINK_UPDATE_MODE_FULL 0x20
++#define EINK_WAIT_MODE_WAIT 0x40
++#define EINK_COMBINE_MODE_COMBINE 0x80
++#define EINK_DITHER_MODE_DITHER 0x100
++#define EINK_INVERT_MODE_INVERT 0x200
++#define EINK_CONVERT_MODE_CONVERT 0x400
++#define EINK_DITHER_COLOR_Y1 0x800
++#define EINK_POLICY_VALID 0x20000000
++#define EINK_POLICY_DISABLE 0x40000000
++#define EINK_POLICY_SYSTEM_DEFAULT 0x10000000
++#define EPDC_FULL_REFRESH_INTERVAL 24
++#define EPDC_FULL_AREA_PERCENT 35
++#define EPDC_REGION_ALIGN 8
++#define EPDC_DIRTY_TILE 64
++#define EPDC_MAX_TILE_COLS 64
++#define EPDC_MAX_TILE_ROWS 64
++#define EPDC_MAX_DIRTY_REGIONS 12
+ 
+ enum {
+     PAGE_FLIP = 0x00000001,
+@@ -66,6 +97,19 @@ enum {
+ struct fb_context_t {
+     framebuffer_device_t  device;
+     bool epdc_display;
++    unsigned char* epdc_shadow;
++    size_t epdc_shadow_size;
++    bool epdc_shadow_valid;
++    unsigned int epdc_partial_updates;
++    unsigned int epdc_force_refresh_serial;
++    unsigned long epdc_post_count;
++    bool epdc_damage_valid;
++    int epdc_damage_left;
++    int epdc_damage_top;
++    int epdc_damage_width;
++    int epdc_damage_height;
++    bool epdc_policy_valid;
++    int epdc_update_policy;
+ };
+ 
+ static bool isEPDCDisplay()
+@@ -87,16 +131,68 @@ static bool isEPDCDisplay()
+ }
+ 
+ __u32 marker_val = 1;
+-static __u32 update_to_display(private_module_t* m, int left, int top, int width, int height,
+-        int wave_mode, int wait_for_complete, uint flags)
++static unsigned long epdc_update_count;
++
++static long elapsed_ms(const struct timespec& start, const struct timespec& end)
++{
++	return (end.tv_sec - start.tv_sec) * 1000L
++		+ (end.tv_nsec - start.tv_nsec) / 1000000L;
++}
++
++static int decode_eink_waveform(int policy)
++{
++    if ((policy & EINK_AUTO_MODE_AUTOMATIC) != 0)
++        return E70Q10_WAVEFORM_AUTO;
++
++    switch (policy & EINK_WAVEFORM_MASK) {
++    case 0: return E70Q10_WAVEFORM_INIT;
++    case 1: return E70Q10_WAVEFORM_DU;
++    case 2: return E70Q10_WAVEFORM_GC16;
++    case 3: return E70Q10_WAVEFORM_GL16;   // GC4 fallback
++    case 4: return E70Q10_WAVEFORM_DU;     // ANIM
++    case 5: return E70Q10_WAVEFORM_A2;
++    case 6: return E70Q10_WAVEFORM_GL16;
++    case 7: return E70Q10_WAVEFORM_REAGL;
++    case 8: return E70Q10_WAVEFORM_REAGLD;
++    default: return E70Q10_WAVEFORM_AUTO;
++    }
++}
++
++static unsigned int decode_eink_flags(int policy)
++{
++    unsigned int flags = 0;
++    if ((policy & EINK_COMBINE_MODE_COMBINE) != 0)
++        flags |= EPDC_FLAG_GROUP_UPDATE;
++    if ((policy & EINK_INVERT_MODE_INVERT) != 0)
++        flags |= EPDC_FLAG_ENABLE_INVERSION;
++    if ((policy & EINK_CONVERT_MODE_CONVERT) != 0)
++        flags |= EPDC_FLAG_FORCE_MONOCHROME;
++    if ((policy & EINK_DITHER_MODE_DITHER) != 0) {
++        flags |= (policy & EINK_DITHER_COLOR_Y1) != 0
++                ? EPDC_FLAG_USE_DITHERING_Y1
++                : EPDC_FLAG_USE_DITHERING_Y4;
++    }
++    return flags;
++}
++
++static int update_to_display(private_module_t* m, int left, int top, int width, int height,
++        int wave_mode, int update_mode, int wait_for_complete, uint flags)
+ {
+ 	struct mxcfb_update_data upd_data;
+ 	struct mxcfb_update_marker_data upd_marker_data;
++	struct timespec start_time;
++	struct timespec end_time;
+ 	int retval;
++	int retries = 0;
+ 	int wait = wait_for_complete | (flags & EPDC_FLAG_TEST_COLLISION);
+ 	int max_retry = EPDC_WAITCOUNT;
++	unsigned long sequence = ++epdc_update_count;
++
++	clock_gettime(CLOCK_MONOTONIC, &start_time);
+ 
+-	upd_data.update_mode = UPDATE_MODE_PARTIAL;
++	memset(&upd_data, 0, sizeof(upd_data));
++	memset(&upd_marker_data, 0, sizeof(upd_marker_data));
++	upd_data.update_mode = update_mode;
+ 	upd_data.waveform_mode = wave_mode;
+ 	upd_data.update_region.left = left;
+ 	upd_data.update_region.width = width;
+@@ -112,37 +208,54 @@ static __u32 update_to_display(private_module_t* m, int left, int top, int width
+ 		upd_data.update_marker = 0;
+ 
+ 	retval = ioctl(m->framebuffer->fd, MXCFB_SEND_UPDATE, &upd_data);
+-	while (retval < 0) {
++	while (retval < 0 && wait) {
+ 		/* We have limited memory available for updates, so wait and
+ 		 * then try again after some updates have completed */
+ 		usleep(EPDC_WAITTIME_MS);
+ 		retval = ioctl(m->framebuffer->fd, MXCFB_SEND_UPDATE, &upd_data);
++		retries++;
+ 		if (--max_retry <= 0) {
+-			ALOGE("Max retries exceeded\n");
++			ALOGE("E70Q10_EPDC submit failed seq=%lu marker=%u errno=%d",
++				sequence, upd_data.update_marker, errno);
+ 			wait = 0;
+ 			flags = 0;
+ 			break;
+ 		}
+ 	}
+ 
+-	if (wait) {
++	if (retval >= 0 && wait) {
+ 		upd_marker_data.update_marker = upd_data.update_marker;
+ 
+ 		/* Wait for update to complete */
+ 		//retval = ioctl(fd_fb_ioctl, MXCFB_WAIT_FOR_UPDATE_COMPLETE, &upd_marker_data);
+ 		retval = ioctl(m->framebuffer->fd, MXCFB_WAIT_FOR_UPDATE_COMPLETE, &upd_marker_data);
+ 		if (retval < 0) {
+-			ALOGE("Wait for update complete failed.  Error = 0x%x", retval);
++			ALOGE("E70Q10_EPDC wait failed seq=%lu marker=%u errno=%d",
++				sequence, upd_data.update_marker, errno);
+ 			flags = 0;
+ 		}
+ 	}
+ 
++	clock_gettime(CLOCK_MONOTONIC, &end_time);
++    if (sequence <= 8 || (sequence % 120) == 0 || wait ||
++            retval < 0 || retries > 0) {
++		ALOGI("E70Q10_EPDC seq=%lu marker=%u region=%d,%d %dx%d wave=%d "
++			"mode=%d wait=%d retries=%d result=%d latency_ms=%ld",
++			sequence, upd_data.update_marker, left, top, width, height,
++			wave_mode, update_mode, wait, retries, retval,
++			elapsed_ms(start_time, end_time));
++	}
++
++	if (retval < 0)
++		return retval;
++
+ 	if (flags & EPDC_FLAG_TEST_COLLISION) {
+ 		ALOGE("Collision test result = %d\n",
+ 			upd_marker_data.collision_test);
+ 		return upd_marker_data.collision_test;
+-	} else
+-		return upd_data.waveform_mode;
++	}
++
++	return 0;
+ }
+ 
+ /*****************************************************************************/
+@@ -157,21 +270,672 @@ static int fb_setSwapInterval(struct framebuffer_device_t* dev,
+     return 0;
+ }
+ 
++static int fb_setEinkUpdateMode(struct framebuffer_device_t* dev,
++        int updatePolicy)
++{
++    if (dev == NULL)
++        return -EINVAL;
++    fb_context_t* ctx = (fb_context_t*)dev;
++    ctx->epdc_update_policy = updatePolicy;
++    ctx->epdc_policy_valid = updatePolicy != -1 &&
++            (updatePolicy & EINK_POLICY_VALID) != 0;
++    return 0;
++}
++
+ static int fb_setUpdateRect(struct framebuffer_device_t* dev,
+         int l, int t, int w, int h)
+ {
++    if (dev == NULL)
++        return -EINVAL;
+     if (((w|h) <= 0) || ((l|t)<0))
+         return -EINVAL;
+-        
++
+     fb_context_t* ctx = (fb_context_t*)dev;
+-    private_module_t* m = reinterpret_cast<private_module_t*>(
+-            dev->common.module);
+-    m->info.reserved[0] = 0x54445055; // "UPDT";
+-    m->info.reserved[1] = (uint16_t)l | ((uint32_t)t << 16);
+-    m->info.reserved[2] = (uint16_t)(l+w) | ((uint32_t)(t+h) << 16);
++    if (l >= static_cast<int>(dev->width) ||
++        t >= static_cast<int>(dev->height)) {
++        return -EINVAL;
++    }
++
++    const int right = l + w > static_cast<int>(dev->width) ?
++            dev->width : l + w;
++    const int bottom = t + h > static_cast<int>(dev->height) ?
++            dev->height : t + h;
++    if (right <= l || bottom <= t)
++        return -EINVAL;
++
++    ctx->epdc_damage_left = l;
++    ctx->epdc_damage_top = t;
++    ctx->epdc_damage_width = right - l;
++    ctx->epdc_damage_height = bottom - t;
++    ctx->epdc_damage_valid = true;
+     return 0;
+ }
+ 
++struct epdc_region_t {
++    int left;
++    int top;
++    int width;
++    int height;
++};
++
++static void clear_epdc_row_padding(private_module_t* m, unsigned char* frame)
++{
++    const int bytes_per_pixel = m->info.bits_per_pixel >> 3;
++    const size_t visible_bytes = m->info.xres * bytes_per_pixel;
++
++    if (frame == NULL || bytes_per_pixel <= 0 ||
++            visible_bytes >= (size_t)m->finfo.line_length)
++        return;
++
++    const size_t padding_bytes = m->finfo.line_length - visible_bytes;
++    for (int y = 0; y < (int)m->info.yres; y++) {
++        memset(frame + y * m->finfo.line_length + visible_bytes,
++                0xff, padding_bytes);
++    }
++}
++
++/*
++ * Aligns one axis so that both the origin and the size are multiples of
++ * EPDC_REGION_ALIGN.
++ *
++ * The PxP processes 8x8 pixel blocks. When a region ends on a partial block the
++ * EPDC also consumes the pixels past the requested edge: with WAVEFORM_MODE_AUTO
++ * those stale pixels take part in waveform selection, which shows up as a dark
++ * block flashing in that spot. The kernel only pads such updates on EPDC
++ * revisions below 2.0 (see the "SW workaround for PxP limitation" block in
++ * mxc_epdc_fb.c), so i.MX6SL has to receive an already aligned region.
++ *
++ * This panel is 1404 pixels on one axis, which is not a multiple of 8, so
++ * clamping an aligned rectangle to the panel edge used to leave a 4 pixel
++ * remainder. The status bar clock sits against that edge and repaints every
++ * minute, which is why the artifact appeared there. Grow the region backwards
++ * instead of clamping, and only fall back to the raw panel size when the region
++ * already covers the whole axis.
++ */
++static void align_epdc_axis(int* origin, int* size, int limit)
++{
++    const int end = *origin + *size;
++    int start = (*origin / EPDC_REGION_ALIGN) * EPDC_REGION_ALIGN;
++    int aligned_end = ((end + EPDC_REGION_ALIGN - 1) / EPDC_REGION_ALIGN) *
++            EPDC_REGION_ALIGN;
++
++    if (aligned_end > limit) {
++        /*
++         * Keep the aligned length by moving the start back. The start is
++         * already a multiple of the alignment, so it stays aligned.
++         */
++        const int length = aligned_end - start;
++        start = limit - length;
++        if (start < 0)
++            start = 0;
++        aligned_end = start + length;
++        if (aligned_end > limit) {
++            /* The region spans the whole axis: nothing left to shift. */
++            start = 0;
++            aligned_end = limit;
++        }
++    }
++
++    *origin = start;
++    *size = aligned_end - start;
++}
++
++static void align_epdc_region(epdc_region_t* region, int width, int height)
++{
++    align_epdc_axis(&region->left, &region->width, width);
++    align_epdc_axis(&region->top, &region->height, height);
++}
++
++/*
++ * SurfaceFlinger does not pass useful E Ink dirty rectangles through this
++ * legacy framebuffer HAL.  A single pixel bounding box is a poor substitute:
++ * unrelated status-bar and content changes can turn two tiny updates into a
++ * nearly full-screen AUTO waveform.  Recover Tolino-style dirty rectangles by
++ * finding connected components on a coarse tile map.
++ */
++static int find_changed_regions(const unsigned char* frame,
++        const unsigned char* shadow, int width, int height, int stride,
++        int bytes_per_pixel, epdc_region_t* regions, int max_regions,
++        unsigned long* changed_area)
++{
++    const int cols = (width + EPDC_DIRTY_TILE - 1) / EPDC_DIRTY_TILE;
++    const int rows = (height + EPDC_DIRTY_TILE - 1) / EPDC_DIRTY_TILE;
++    const int tile_count = cols * rows;
++    bool dirty[EPDC_MAX_TILE_COLS * EPDC_MAX_TILE_ROWS];
++    bool visited[EPDC_MAX_TILE_COLS * EPDC_MAX_TILE_ROWS];
++    int queue[EPDC_MAX_TILE_COLS * EPDC_MAX_TILE_ROWS];
++    int overall_min_col = cols;
++    int overall_min_row = rows;
++    int overall_max_col = -1;
++    int overall_max_row = -1;
++    int region_count = 0;
++
++    *changed_area = 0;
++    if (cols > EPDC_MAX_TILE_COLS || rows > EPDC_MAX_TILE_ROWS)
++        return -1;
++
++    memset(dirty, 0, tile_count * sizeof(dirty[0]));
++    memset(visited, 0, tile_count * sizeof(visited[0]));
++
++    for (int tile_y = 0; tile_y < rows; tile_y++) {
++        const int top = tile_y * EPDC_DIRTY_TILE;
++        const int tile_height =
++                top + EPDC_DIRTY_TILE <= height ? EPDC_DIRTY_TILE :
++                height - top;
++
++        for (int tile_x = 0; tile_x < cols; tile_x++) {
++            const int left = tile_x * EPDC_DIRTY_TILE;
++            const int tile_width =
++                    left + EPDC_DIRTY_TILE <= width ? EPDC_DIRTY_TILE :
++                    width - left;
++            bool tile_dirty = false;
++
++            for (int y = 0; y < tile_height; y++) {
++                const unsigned char* frame_row =
++                        frame + (top + y) * stride +
++                        left * bytes_per_pixel;
++                const unsigned char* shadow_row =
++                        shadow + (top + y) * stride +
++                        left * bytes_per_pixel;
++                if (memcmp(frame_row, shadow_row,
++                        tile_width * bytes_per_pixel) != 0) {
++                    tile_dirty = true;
++                    break;
++                }
++            }
++
++            if (!tile_dirty)
++                continue;
++
++            dirty[tile_y * cols + tile_x] = true;
++            *changed_area += (unsigned long)tile_width * tile_height;
++            if (tile_x < overall_min_col)
++                overall_min_col = tile_x;
++            if (tile_x > overall_max_col)
++                overall_max_col = tile_x;
++            if (tile_y < overall_min_row)
++                overall_min_row = tile_y;
++            if (tile_y > overall_max_row)
++                overall_max_row = tile_y;
++        }
++    }
++
++    if (overall_max_col < 0)
++        return 0;
++
++    for (int start = 0; start < tile_count; start++) {
++        if (!dirty[start] || visited[start])
++            continue;
++
++        int head = 0;
++        int tail = 0;
++        int min_col = start % cols;
++        int max_col = min_col;
++        int min_row = start / cols;
++        int max_row = min_row;
++        queue[tail++] = start;
++        visited[start] = true;
++
++        while (head < tail) {
++            const int current = queue[head++];
++            const int col = current % cols;
++            const int row = current / cols;
++            const int neighbours[4] = {
++                col > 0 ? current - 1 : -1,
++                col + 1 < cols ? current + 1 : -1,
++                row > 0 ? current - cols : -1,
++                row + 1 < rows ? current + cols : -1
++            };
++
++            if (col < min_col)
++                min_col = col;
++            if (col > max_col)
++                max_col = col;
++            if (row < min_row)
++                min_row = row;
++            if (row > max_row)
++                max_row = row;
++
++            for (int i = 0; i < 4; i++) {
++                const int next = neighbours[i];
++                if (next >= 0 && dirty[next] && !visited[next]) {
++                    visited[next] = true;
++                    queue[tail++] = next;
++                }
++            }
++        }
++
++        if (region_count >= max_regions) {
++            regions[0].left = overall_min_col * EPDC_DIRTY_TILE;
++            regions[0].top = overall_min_row * EPDC_DIRTY_TILE;
++            regions[0].width =
++                    (overall_max_col + 1) * EPDC_DIRTY_TILE -
++                    regions[0].left;
++            regions[0].height =
++                    (overall_max_row + 1) * EPDC_DIRTY_TILE -
++                    regions[0].top;
++            align_epdc_region(&regions[0], width, height);
++            return 1;
++        }
++
++        epdc_region_t* region = &regions[region_count++];
++        region->left = min_col * EPDC_DIRTY_TILE;
++        region->top = min_row * EPDC_DIRTY_TILE;
++        region->width = (max_col + 1) * EPDC_DIRTY_TILE - region->left;
++        region->height = (max_row + 1) * EPDC_DIRTY_TILE - region->top;
++        align_epdc_region(region, width, height);
++    }
++
++    return region_count;
++}
++
++static void epdc_refresh(fb_context_t* ctx, private_module_t* m,
++        const unsigned char* frame)
++{
++    const int width = m->info.xres;
++    const int height = m->info.yres;
++    const int stride = m->finfo.line_length;
++    const int bytes_per_pixel = m->info.bits_per_pixel >> 3;
++    const size_t frame_size = stride * height;
++    epdc_region_t regions[EPDC_MAX_DIRTY_REGIONS];
++    int region_count = 1;
++    long diff_ms = 0;
++    unsigned long changed_area = (unsigned long)width * height;
++    char force_refresh[PROPERTY_VALUE_MAX];
++    property_get("sys.ridi.epd.full_refresh_seq", force_refresh, "0");
++    const unsigned int force_refresh_serial =
++            (unsigned int)strtoul(force_refresh, NULL, 10);
++    const bool requested_full_refresh =
++            force_refresh_serial != 0
++            && force_refresh_serial != ctx->epdc_force_refresh_serial;
++    if (requested_full_refresh) {
++        /*
++         * Invalidating the shadow forces the existing first-frame path to
++         * submit one full-screen GC16 update even when the pixels did not
++         * otherwise change. A successful post rebuilds the shadow below.
++         */
++        ctx->epdc_force_refresh_serial = force_refresh_serial;
++        ctx->epdc_shadow_valid = false;
++        ALOGI("E70Q10_EPDC UI requested full refresh post=%lu",
++                ctx->epdc_post_count + 1);
++    }
++    const int update_policy = ctx->epdc_update_policy;
++    const bool explicit_policy = ctx->epdc_policy_valid &&
++            update_policy != -1 && (update_policy & EINK_POLICY_VALID) != 0;
++    // Policy and damage both describe exactly one subsequent post.
++    ctx->epdc_policy_valid = false;
++    ctx->epdc_update_policy = -1;
++
++    const bool policy_full = explicit_policy &&
++            (update_policy & EINK_UPDATE_MODE_FULL) != 0;
++    const bool policy_wait = explicit_policy &&
++            (update_policy & EINK_WAIT_MODE_WAIT) != 0;
++    /*
++     * Only a genuine application request may override the driver's residue
++     * handling. The framework's own default accompanies every ordinary frame,
++     * so treating it as explicit would disable ghost cleanup everywhere.
++     */
++    const bool policy_app = explicit_policy &&
++            (update_policy & EINK_POLICY_SYSTEM_DEFAULT) == 0;
++    const bool explicit_partial = policy_app && !policy_full;
++    bool full_refresh = !ctx->epdc_shadow_valid || policy_full;
++    /*
++     * Only the first refresh waits by default. An explicit WAIT request is
++     * honored for its matching frame, while ordinary and explicit NOWAIT
++     * updates do not serialize SurfaceFlinger behind every waveform.
++     */
++    bool wait_for_complete = !ctx->epdc_shadow_valid || policy_wait;
++    const bool explicit_damage = ctx->epdc_damage_valid;
++    epdc_region_t supplied_damage;
++
++    if (explicit_damage) {
++        supplied_damage.left = ctx->epdc_damage_left;
++        supplied_damage.top = ctx->epdc_damage_top;
++        supplied_damage.width = ctx->epdc_damage_width;
++        supplied_damage.height = ctx->epdc_damage_height;
++        align_epdc_region(&supplied_damage, width, height);
++    }
++    /*
++     * setUpdateRect() describes exactly one subsequent post. Consume it even
++     * if this frame later fails so stale coordinates cannot leak into another
++     * SurfaceFlinger frame.
++     */
++    ctx->epdc_damage_valid = false;
++
++    ctx->epdc_post_count++;
++
++    if (explicit_policy && (update_policy & EINK_POLICY_DISABLE) != 0) {
++        ALOGI("E70Q10_EPDC disabled post=%lu policy=0x%08x",
++                ctx->epdc_post_count, update_policy);
++        // Do not advance the shadow: it represents the last frame submitted
++        // to the physical panel, not merely the newest framebuffer contents.
++        return;
++    }
++
++    if (bytes_per_pixel <= 0 || frame == NULL) {
++        ALOGE("E70Q10_EPDC invalid frame bpp=%d frame=%p",
++                bytes_per_pixel, frame);
++        return;
++    }
++
++    if (ctx->epdc_shadow_size != frame_size) {
++        free(ctx->epdc_shadow);
++        ctx->epdc_shadow = (unsigned char*)malloc(frame_size);
++        ctx->epdc_shadow_size = ctx->epdc_shadow ? frame_size : 0;
++        ctx->epdc_shadow_valid = false;
++        ctx->epdc_partial_updates = 0;
++        full_refresh = true;
++        wait_for_complete = true;
++        if (ctx->epdc_shadow == NULL)
++            ALOGE("E70Q10_EPDC shadow allocation failed size=%zu", frame_size);
++    }
++
++    if (ctx->epdc_shadow_valid) {
++        /*
++         * Always compare against the shadow of the previously submitted frame.
++         * SurfaceFlinger's damage is the semantic invalidation rectangle for
++         * this exact frame. Pixel differences remain a conservative union so
++         * changed pixels outside that rectangle cannot remain stale on E Ink.
++         */
++        struct timespec diff_start;
++        struct timespec diff_end;
++        clock_gettime(CLOCK_MONOTONIC, &diff_start);
++        region_count = find_changed_regions(frame, ctx->epdc_shadow,
++                width, height, stride, bytes_per_pixel, regions,
++                EPDC_MAX_DIRTY_REGIONS, &changed_area);
++        clock_gettime(CLOCK_MONOTONIC, &diff_end);
++        diff_ms = elapsed_ms(diff_start, diff_end);
++
++        if (explicit_damage) {
++            const bool diff_empty = region_count == 0;
++            epdc_region_t diff_bounds = supplied_damage;
++
++            if (region_count > 0) {
++                int diff_left = regions[0].left;
++                int diff_top = regions[0].top;
++                int diff_right = regions[0].left + regions[0].width;
++                int diff_bottom = regions[0].top + regions[0].height;
++
++                for (int i = 1; i < region_count; i++) {
++                    diff_left = std::min(diff_left, regions[i].left);
++                    diff_top = std::min(diff_top, regions[i].top);
++                    diff_right = std::max(diff_right,
++                            regions[i].left + regions[i].width);
++                    diff_bottom = std::max(diff_bottom,
++                            regions[i].top + regions[i].height);
++                }
++                diff_bounds.left = diff_left;
++                diff_bounds.top = diff_top;
++                diff_bounds.width = diff_right - diff_left;
++                diff_bounds.height = diff_bottom - diff_top;
++            }
++
++            const bool covered = diff_empty ||
++                    (diff_bounds.left >= supplied_damage.left &&
++                     diff_bounds.top >= supplied_damage.top &&
++                     diff_bounds.left + diff_bounds.width <=
++                             supplied_damage.left + supplied_damage.width &&
++                     diff_bounds.top + diff_bounds.height <=
++                             supplied_damage.top + supplied_damage.height);
++
++            if (region_count < 0) {
++                /* Tile map unusable: trust the supplied rectangle alone. */
++                regions[0] = supplied_damage;
++                region_count = 1;
++                changed_area = (unsigned long)supplied_damage.width *
++                        supplied_damage.height;
++            } else if (diff_empty) {
++                /*
++                 * A waveform request can be meaningful even when framebuffer
++                 * bytes are unchanged (for example, GC16 ghost cleanup). Keep
++                 * its matching semantic damage; redundant ordinary posts may
++                 * still be skipped.
++                 */
++                const unsigned long supplied_area =
++                        (unsigned long)supplied_damage.width *
++                        supplied_damage.height;
++                const unsigned long panel_area =
++                        (unsigned long)width * height;
++                /*
++                 * Honor a request whose pixels did not change only when it is
++                 * an explicit full cleanup, or when it is confined to a small
++                 * area. A large partial request over unchanged pixels is a
++                 * redundant repaint and would otherwise flash most of the panel.
++                 */
++                if (policy_full ||
++                        (policy_app && supplied_area * 100 <
++                                panel_area * EPDC_FULL_AREA_PERCENT)) {
++                    regions[0] = supplied_damage;
++                    region_count = 1;
++                    changed_area = supplied_area;
++                } else {
++                    region_count = 0;
++                }
++            } else {
++                /*
++                 * The pixel difference is authoritative. It already contains
++                 * every change the panel has to show, including the area a
++                 * dismissed popup stopped covering, because that area differs
++                 * from the previously submitted frame.
++                 *
++                 * SurfaceFlinger's damage is often far larger than the real
++                 * change: a one minute clock tick arrives with a 1600x1404
++                 * rectangle around a 64x64 difference. Unioning the two turned
++                 * every such frame into a near full-screen update, so the
++                 * supplied rectangle is now only a fallback.
++                 */
++                regions[0] = diff_bounds;
++                region_count = 1;
++            }
++
++            if (!covered || ctx->epdc_post_count <= 20 ||
++                    (ctx->epdc_post_count % 120) == 0) {
++                ALOGI("E70Q10_EPDC damage post=%lu supplied=%d,%d %dx%d "
++                      "diff=%d,%d %dx%d covered=%d used=%d,%d %dx%d",
++                      ctx->epdc_post_count,
++                      supplied_damage.left, supplied_damage.top,
++                      supplied_damage.width, supplied_damage.height,
++                      diff_bounds.left, diff_bounds.top,
++                      diff_bounds.width, diff_bounds.height,
++                      covered ? 1 : 0,
++                      region_count > 0 ? regions[0].left : 0,
++                      region_count > 0 ? regions[0].top : 0,
++                      region_count > 0 ? regions[0].width : 0,
++                      region_count > 0 ? regions[0].height : 0);
++            }
++        }
++
++        if (region_count == 0) {
++            if (policy_app || policy_full) {
++                /* No damage metadata: execute the request on the full panel. */
++                regions[0].left = 0;
++                regions[0].top = 0;
++                regions[0].width = width;
++                regions[0].height = height;
++                region_count = 1;
++                changed_area = (unsigned long)width * height;
++            } else {
++                if (ctx->epdc_post_count <= 8 ||
++                        (ctx->epdc_post_count % 120) == 0) {
++                    ALOGI("E70Q10_EPDC unchanged post=%lu skip",
++                            ctx->epdc_post_count);
++                }
++                return;
++            }
++        }
++        if (region_count < 0) {
++            regions[0].left = 0;
++            regions[0].top = 0;
++            regions[0].width = width;
++            regions[0].height = height;
++            region_count = 1;
++            changed_area = (unsigned long)width * height;
++        }
++
++        /*
++         * Periodic ghost cleanup only, and only for frames the application did
++         * not describe itself. Promoting by changed area turned ordinary large
++         * repaints into full-screen GC16 flashes; window transitions already
++         * arrive with an explicit FULL policy from the framework, and the
++         * reader UI keeps its own REAGL waveform.
++         */
++        if (!policy_app &&
++                ctx->epdc_partial_updates >= EPDC_FULL_REFRESH_INTERVAL) {
++            regions[0].left = 0;
++            regions[0].top = 0;
++            regions[0].width = width;
++            regions[0].height = height;
++            region_count = 1;
++            full_refresh = true;
++        }
++    } else {
++        regions[0].left = 0;
++        regions[0].top = 0;
++        regions[0].width = width;
++        regions[0].height = height;
++    }
++
++    /*
++     * An application asking for FULL means "clean the whole panel", so honor it
++     * literally. The framework also attaches FULL to any whole-window repaint;
++     * that only needs a full waveform over the pixels that actually changed,
++     * otherwise an incidental relayout flashes the entire screen.
++     */
++    if (policy_full) {
++        full_refresh = true;
++        if (policy_app || !ctx->epdc_shadow_valid || region_count <= 0) {
++            regions[0].left = 0;
++            regions[0].top = 0;
++            regions[0].width = width;
++            regions[0].height = height;
++            region_count = 1;
++        }
++    }
++
++    /*
++     * MXCFB_WAIT_FOR_UPDATE_COMPLETE takes roughly 0.8 seconds on this panel
++     * and can take up to the kernel's five-second timeout. Never wait once per
++     * dirty tile: a screen transition can contain dozens of tiles and would
++     * block SurfaceFlinger for minutes.
++     *
++     * Merge all changed tiles into one bounding rectangle. This includes both
++     * old and new positions of moving/dismissed content, leaving exactly one
++     * marker and at most one completion wait for each posted frame.
++     */
++    if (region_count > 1) {
++        int merged_left = regions[0].left;
++        int merged_top = regions[0].top;
++        int merged_right = regions[0].left + regions[0].width;
++        int merged_bottom = regions[0].top + regions[0].height;
++
++        for (int i = 1; i < region_count; i++) {
++            merged_left = std::min(merged_left, regions[i].left);
++            merged_top = std::min(merged_top, regions[i].top);
++            merged_right = std::max(merged_right,
++                    regions[i].left + regions[i].width);
++            merged_bottom = std::max(merged_bottom,
++                    regions[i].top + regions[i].height);
++        }
++
++        regions[0].left = merged_left;
++        regions[0].top = merged_top;
++        regions[0].width = merged_right - merged_left;
++        regions[0].height = merged_bottom - merged_top;
++        region_count = 1;
++        align_epdc_region(&regions[0], width, height);
++    }
++
++    /*
++     * Everything above may have replaced the region with a raw rectangle, so
++     * make the final submission aligned no matter which path produced it.
++     */
++    for (int i = 0; i < region_count; i++)
++        align_epdc_region(&regions[i], width, height);
++
++    /*
++     * The Settings/SystemUI sequence property explicitly means a physical
++     * GC16 cleanup. It must outrank a persistent per-window REAGL/AUTO mode;
++     * ordinary explicit policies retain their requested waveform.
++     */
++    /*
++     * Waveform precedence:
++     *   1. an external forced refresh is always a GC16 cleanup,
++     *   2. an application's own request is honored verbatim,
++     *   3. any remaining full update is a cleanup and must use GC16 rather
++     *      than the framework's default AUTO,
++     *   4. otherwise follow the framework default, or GL16 when absent.
++     */
++    int waveform;
++    if (requested_full_refresh) {
++        waveform = E70Q10_WAVEFORM_GC16;
++    } else if (policy_app) {
++        waveform = decode_eink_waveform(update_policy);
++    } else if (full_refresh) {
++        waveform = E70Q10_WAVEFORM_GC16;
++    } else if (explicit_policy) {
++        waveform = decode_eink_waveform(update_policy);
++    } else {
++        waveform = E70Q10_WAVEFORM_GL16;
++    }
++    /* First-frame/forced safety remains FULL even if a caller asks PARTIAL. */
++    const int update_mode = full_refresh ?
++            UPDATE_MODE_FULL : UPDATE_MODE_PARTIAL;
++    const unsigned int update_flags = explicit_policy ?
++            decode_eink_flags(update_policy) : 0;
++
++    if (explicit_policy || full_refresh || ctx->epdc_post_count <= 8 ||
++            (ctx->epdc_post_count % 120) == 0) {
++        ALOGI("E70Q10_EPDC policy post=%lu packed=0x%08x app=%d "
++              "region=%d,%d %dx%d wave=%d mode=%d wait=%d flags=0x%x",
++              ctx->epdc_post_count,
++              static_cast<unsigned int>(update_policy),
++              policy_app ? 1 : 0,
++              regions[0].left, regions[0].top,
++              regions[0].width, regions[0].height,
++              waveform, update_mode, wait_for_complete ? 1 : 0,
++              update_flags);
++    }
++
++    bool all_submitted = true;
++    for (int i = 0; i < region_count; i++) {
++        const int update_result = update_to_display(m, regions[i].left,
++                regions[i].top, regions[i].width, regions[i].height,
++                waveform, update_mode, wait_for_complete ? 1 : 0,
++                update_flags);
++        if (update_result < 0) {
++            all_submitted = false;
++            if (ctx->epdc_post_count <= 8 ||
++                    (ctx->epdc_post_count % 120) == 0) {
++                ALOGW("E70Q10_EPDC busy post=%lu drop region=%d,%d %dx%d errno=%d",
++                        ctx->epdc_post_count, regions[i].left, regions[i].top,
++                        regions[i].width, regions[i].height, errno);
++            }
++        }
++    }
++    if (!all_submitted)
++        return;
++
++    if (full_refresh)
++        ctx->epdc_partial_updates = 0;
++    else
++        ctx->epdc_partial_updates++;
++
++    if (ctx->epdc_shadow != NULL) {
++        struct timespec shadow_start;
++        struct timespec shadow_end;
++        clock_gettime(CLOCK_MONOTONIC, &shadow_start);
++        memcpy(ctx->epdc_shadow, frame, frame_size);
++        clock_gettime(CLOCK_MONOTONIC, &shadow_end);
++        ctx->epdc_shadow_valid = true;
++        if (ctx->epdc_post_count <= 8 ||
++                (ctx->epdc_post_count % 120) == 0) {
++            ALOGI("E70Q10_EPDC cost post=%lu diff_ms=%ld shadow_ms=%ld",
++                    ctx->epdc_post_count, diff_ms,
++                    elapsed_ms(shadow_start, shadow_end));
++        }
++    }
++}
++
+ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+ {
+     if (private_handle_t::validate(buffer) < 0)
+@@ -183,7 +947,10 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+     private_module_t* m = reinterpret_cast<private_module_t*>(
+             dev->common.module);
+     if (hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER) {
+-	    int wave_mode = WAVEFORM_MODE_AUTO;
++        if (ctx->epdc_display == true) {
++            clear_epdc_row_padding(m,
++                    reinterpret_cast<unsigned char*>(hnd->base));
++        }
+         const size_t offset = hnd->base - m->framebuffer->base;
+         m->info.activate = FB_ACTIVATE_VBL;
+         m->info.yoffset = offset / m->finfo.line_length;
+@@ -193,11 +960,10 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+             return -errno;
+         }
+ 
+-        // Update EPDC with mode, and waveform setting
+-        if (ctx->epdc_display == true)
+-            update_to_display(m, 0, 0,
+-                    m->info.xres, m->info.yres,
+-                    WAVEFORM_MODE_AUTO, 1, 0);
++        if (ctx->epdc_display == true) {
++            epdc_refresh(ctx, m,
++                    reinterpret_cast<const unsigned char*>(hnd->base));
++        }
+ 
+         m->currentBuffer = buffer;
+         
+@@ -218,8 +984,64 @@ static int fb_post(struct framebuffer_device_t* dev, buffer_handle_t buffer)
+                 0, 0, m->info.xres, m->info.yres,
+                 &buffer_vaddr);
+ 
+-        memcpy(fb_vaddr, buffer_vaddr, m->finfo.line_length * m->info.yres);
+-        
++        const size_t copy_bytes = m->finfo.line_length * m->info.yres;
++        struct timespec copy_start;
++        struct timespec copy_end;
++        clock_gettime(CLOCK_MONOTONIC, &copy_start);
++        memcpy(fb_vaddr, buffer_vaddr, copy_bytes);
++        clock_gettime(CLOCK_MONOTONIC, &copy_end);
++        static unsigned long copy_count;
++        copy_count++;
++        if (copy_count <= 8 || (copy_count % 120) == 0) {
++            ALOGI("E70Q10_EPDC fbcopy post=%lu bytes=%zu ms=%ld",
++                    copy_count, copy_bytes,
++                    elapsed_ms(copy_start, copy_end));
++        }
++
++        if (ctx->epdc_display == true) {
++            /*
++             * The software/HWC output buffer is always copied into the first
++             * framebuffer page.  A preceding framebuffer-target post may
++             * have left the EPDC scanning the second page, however.  Make the
++             * page containing the new pixels active before submitting the
++             * update; otherwise the shadow diff sees page 0 while the EPDC
++             * refreshes stale page 1.
++             */
++            /*
++             * Do this unconditionally. SurfaceFlinger and HWC can hold
++             * different gralloc module instances, so m->info.yoffset is not a
++             * reliable cache of the kernel's active scan page. A stale page 1
++             * combined with dirty rectangles calculated from page 0 updates
++             * unrelated old content (most visibly the top-right clock tile).
++             */
++            m->info.activate = FB_ACTIVATE_VBL;
++            m->info.xoffset = 0;
++            m->info.yoffset = 0;
++            if (ioctl(m->framebuffer->fd, FBIOPAN_DISPLAY,
++                    &m->info) == -1) {
++                ALOGE("E70Q10_EPDC failed to select copy page errno=%d",
++                        errno);
++            }
++            clear_epdc_row_padding(m,
++                    reinterpret_cast<unsigned char*>(fb_vaddr));
++            /*
++             * The change detection reads a full frame and the shadow update
++             * reads it again. The framebuffer mapping is uncached device
++             * memory, so those two passes cost far more than the single copy
++             * above. The source buffer is ordinary cached memory and now holds
++             * identical pixels at an identical stride, so run both passes on
++             * it instead. Only the row padding differs, and that lies outside
++             * the compared visible width.
++             */
++            const unsigned char* content =
++                    reinterpret_cast<const unsigned char*>(buffer_vaddr);
++            if (hnd->size > 0 &&
++                    static_cast<size_t>(hnd->size) < copy_bytes) {
++                content = reinterpret_cast<const unsigned char*>(fb_vaddr);
++            }
++            epdc_refresh(ctx, m, content);
++        }
++
+         m->base.unlock(&m->base, buffer); 
+         m->base.unlock(&m->base, m->framebuffer); 
+     }
+@@ -390,7 +1212,13 @@ int mapFrameBufferLocked(struct private_module_t* module)
+         return -errno;
+     }
+     module->framebuffer->base = intptr_t(vaddr);
+-    memset(vaddr, 0, fbSize);
++    /*
++     * EPDC rounds each 1872-pixel row to a 1888-pixel/3776-byte stride.
++     * PixelFlinger only paints the visible 1872 pixels.  Keep the 16 padding
++     * pixels white: the EPDC/PxP aligned fetch can otherwise expose the
++     * zero-filled padding as a dark line at the physical right edge.
++     */
++    memset(vaddr, 0xff, fbSize);
+     return 0;
+ }
+ 
+@@ -408,6 +1236,7 @@ static int fb_close(struct hw_device_t *dev)
+ {
+     fb_context_t* ctx = (fb_context_t*)dev;
+     if (ctx) {
++        free(ctx->epdc_shadow);
+         free(ctx);
+     }
+     return 0;
+@@ -429,7 +1258,9 @@ int fb_device_open(hw_module_t const* module, const char* name,
+         dev->device.common.close = fb_close;
+         dev->device.setSwapInterval = fb_setSwapInterval;
+         dev->device.post            = fb_post;
+-        dev->device.setUpdateRect = 0;
++        dev->device.setUpdateRect = fb_setUpdateRect;
++        dev->device.reserved_proc[0] =
++                reinterpret_cast<void*>(fb_setEinkUpdateMode);
+ 
+         if(isEPDCDisplay())
+             dev->epdc_display = true;
+diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/gralloc.cpp b/vendor/nxp-opensource/imx/display/gralloc_v1/gralloc.cpp
+index 36ee3eb..78e90f1 100644
+--- a/vendor/nxp-opensource/imx/display/gralloc_v1/gralloc.cpp
++++ b/vendor/nxp-opensource/imx/display/gralloc_v1/gralloc.cpp
+@@ -133,9 +133,10 @@ static int gralloc_alloc_framebuffer_locked(alloc_device_t* dev,
+         return -ENOMEM;
+     }
+ 
+-    // create a "fake" handles for it
++    // create a "fake" handle for it
+     intptr_t vaddr = intptr_t(m->framebuffer->base);
+-    private_handle_t* hnd = new private_handle_t(dup(m->framebuffer->fd), size,
++    private_handle_t* hnd = new private_handle_t(dup(m->framebuffer->fd),
++            bufferSize,
+             private_handle_t::PRIV_FLAGS_FRAMEBUFFER);
+ 
+     // find a free slot
+@@ -146,7 +147,7 @@ static int gralloc_alloc_framebuffer_locked(alloc_device_t* dev,
+         }
+         vaddr += bufferSize;
+     }
+-    
++
+     hnd->base = vaddr;
+     hnd->offset = vaddr - intptr_t(m->framebuffer->base);
+     *pHandle = hnd;
+@@ -230,6 +231,17 @@ static int gralloc_alloc(alloc_device_t* dev,
+     int err;
+     if (usage & GRALLOC_USAGE_HW_FB) {
+         err = gralloc_alloc_framebuffer(dev, size, usage, pHandle);
++        if (err == 0) {
++            private_module_t* m = reinterpret_cast<private_module_t*>(
++                    dev->common.module);
++            /*
++             * The EPDC rounds xres_virtual up from 1872 to 1888 pixels.
++             * Returning the generic four-byte-aligned 1872-pixel stride makes
++             * PixelFlinger pack rows 32 bytes tighter than the kernel/PxP
++             * input stride, which appears as diagonal bands on the panel.
++             */
++            stride = m->finfo.line_length / bpp;
++        }
+     } else {
+         err = gralloc_alloc_buffer(dev, size, usage, pHandle);
+     }
+diff --git a/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp b/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp
+index 5a882e2..a606a64 100644
+--- a/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp
++++ b/vendor/nxp-opensource/imx/display/gralloc_v1/mapper.cpp
+@@ -31,6 +31,7 @@
+ #include <hardware/gralloc.h>
+ 
+ #include "gralloc_priv.h"
++#include "gr.h"
+ 
+ 
+ /* desktop Linux needs a little help with gettid() */
+@@ -43,12 +44,37 @@ pid_t gettid() { return syscall(__NR_gettid);}
+ 
+ /*****************************************************************************/
+ 
+-static int gralloc_map(gralloc_module_t const* /*module*/,
++static int gralloc_map(gralloc_module_t const* module,
+         buffer_handle_t handle,
+         void** vaddr)
+ {
+     private_handle_t* hnd = (private_handle_t*)handle;
+-    if (!(hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER)) {
++    if (hnd->flags & private_handle_t::PRIV_FLAGS_FRAMEBUFFER) {
++        /*
++         * Android 8 allocates through the binderized allocator HAL.  The
++         * framebuffer handle therefore contains a base address from another
++         * process.  NXP's original gralloc assumed allocation happened in
++         * SurfaceFlinger and left that address untouched, causing PixelFlinger
++         * to write through a stale mapping.
++         *
++         * Map fb0 once in the importing process and rebuild the per-page base
++         * from the transport-safe offset.
++         */
++        private_module_t* m = (private_module_t*)module;
++        int err = 0;
++
++        pthread_mutex_lock(&m->lock);
++        if (!m->framebuffer)
++            err = mapFrameBufferLocked(m);
++        if (!err) {
++            hnd->base = uintptr_t(m->framebuffer->base) + hnd->offset;
++            hnd->pid = getpid();
++        }
++        pthread_mutex_unlock(&m->lock);
++
++        if (err)
++            return err;
++    } else {
+         size_t size = hnd->size;
+         void* mappedAddress = mmap(0, size,
+                 PROT_READ|PROT_WRITE, MAP_SHARED, hnd->fd, 0);
+diff --git a/vendor/nxp-opensource/imx/display/hwcomposer_v10/Android.mk b/vendor/nxp-opensource/imx/display/hwcomposer_v10/Android.mk
+index 5e51397..7ee19ef 100644
+--- a/vendor/nxp-opensource/imx/display/hwcomposer_v10/Android.mk
++++ b/vendor/nxp-opensource/imx/display/hwcomposer_v10/Android.mk
+@@ -29,13 +29,19 @@ LOCAL_SHARED_LIBRARIES :=	\
+ 	libui					\
+ 	libhardware				\
+ 	libhardware_legacy		\
+-	libbinder
++	libbinder				\
++	libpxp					\
++	libsync
+ 
+ LOCAL_SRC_FILES :=			\
+ 	hwcomposer.cpp			\
+ 	hwc_vsync.cpp			\
+     hwc_display.cpp
+ 
++LOCAL_C_INCLUDES += \
++	vendor/nxp-opensource/imx/display/gralloc_v1 \
++	vendor/nxp-opensource/imx-lib/pxp
++
+ LOCAL_VENDOR_MODULE := true
+ LOCAL_MODULE := hwcomposer.$(TARGET_BOARD_PLATFORM)
+ LOCAL_CFLAGS:= -DLOG_TAG=\"hwcomposer\"
+diff --git a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_context.h b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_context.h
+index bda1e07..d953a56 100644
+--- a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_context.h
++++ b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_context.h
+@@ -26,6 +26,7 @@
+ #include <cutils/properties.h>
+ #include <utils/threads.h>
+ #include <hardware/hwcomposer.h>
++#include <hardware/gralloc.h>
+ #include <utils/StrongPointer.h>
+ 
+ #include <linux/mxcfb.h>
+@@ -46,6 +47,7 @@ enum {
+ };
+ 
+ class VSyncThread;
++struct PxpComposer;
+ 
+ struct hwc_context_t {
+     hwc_composer_device_1_t device;
+@@ -57,6 +59,12 @@ struct hwc_context_t {
+     nsecs_t mVsyncPeriod;
+     hwc_procs_t* mCallback;
+     sp<VSyncThread> mVsyncThread;
++    const gralloc_module_t* mGralloc;
++    framebuffer_device_t* mFramebuffer;
++    alloc_device_t* mAllocator;
++    buffer_handle_t mOutputBuffer;
++    int mOutputStride;
++    PxpComposer* mPxp;
+ };
+ 
+ void hwc_get_display_type(struct hwc_context_t* ctx);
+diff --git a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.cpp b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.cpp
+index 59e39f8..491f05a 100644
+--- a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.cpp
++++ b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.cpp
+@@ -41,7 +41,14 @@ status_t VSyncThread::readyToRun()
+ 
+ void VSyncThread::setEnabled(bool enabled) {
+     Mutex::Autolock _l(mLock);
++    if (mEnabled == enabled)
++        return;
+     mEnabled = enabled;
++    /*
++     * Do not retain an expired fake-vsync deadline across disable/enable.
++     * That avoids catch-up bursts when SurfaceFlinger requests vsync again.
++     */
++    mNextFakeVSync = 0;
+     mCondition.signal();
+ }
+ 
+@@ -50,6 +57,12 @@ void VSyncThread::setFakeVSync(bool enable)
+     mFakeVSync = enable;
+ }
+ 
++bool VSyncThread::isEnabled()
++{
++    Mutex::Autolock _l(mLock);
++    return mEnabled;
++}
++
+ bool VSyncThread::threadLoop()
+ {
+     { // scope for lock
+@@ -92,7 +105,7 @@ void VSyncThread::performFakeVSync()
+         err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &spec, NULL);
+     } while (err<0 && errno == EINTR);
+ 
+-    if (err == 0) {
++    if (err == 0 && isEnabled() && mCtx->mCallback != NULL) {
+         mCtx->mCallback->vsync(mCtx->mCallback, 0, next_vsync);
+     }
+ }
+@@ -114,7 +127,8 @@ void VSyncThread::performVSync()
+     nsecs_t cur_time_ns;
+ 
+     cur_time_ns  = systemTime(SYSTEM_TIME_MONOTONIC);
+-    mCtx->mCallback->vsync(mCtx->mCallback, 0, timestamp);
++    if (isEnabled() && mCtx->mCallback != NULL)
++        mCtx->mCallback->vsync(mCtx->mCallback, 0, timestamp);
+     ALOGE("Vsync %llu, %llu\n", cur_time_ns - last_time_ns,
+           cur_time_ns - timestamp);
+     last_time_ns = cur_time_ns;
+@@ -133,4 +147,3 @@ void VSyncThread::performVSync()
+     ts.tv_sec = 0;
+     nanosleep( &ts, &tm);
+ }
+-
+diff --git a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.h b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.h
+index de05844..7c93f79 100644
+--- a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.h
++++ b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwc_vsync.h
+@@ -57,6 +57,7 @@ private:
+     virtual bool threadLoop();
+     void performFakeVSync();
+     void performVSync();
++    bool isEnabled();
+ 
+     hwc_context_t *mCtx;
+     mutable Mutex mLock;
+diff --git a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp
+index d26cde9..87484e5 100644
+--- a/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp
++++ b/vendor/nxp-opensource/imx/display/hwcomposer_v10/hwcomposer.cpp
+@@ -17,23 +17,977 @@
+ 
+ #include <hardware/hardware.h>
+ 
++#include <algorithm>
+ #include <fcntl.h>
+ #include <errno.h>
++#include <math.h>
++#include <time.h>
+ 
+ #include <cutils/log.h>
+ #include <cutils/atomic.h>
+ #include <cutils/properties.h>
+ #include <utils/threads.h>
+ #include <hardware/hwcomposer.h>
++#include <hardware/gralloc.h>
+ #include <utils/StrongPointer.h>
+ 
+ #include <linux/mxcfb.h>
+ #include <linux/ioctl.h>
+ #include <EGL/egl.h>
+ #include <GLES/gl.h>
++#include <sync/sync.h>
+ 
+ #include "hwc_context.h"
+ #include "hwc_vsync.h"
++#include "gralloc_priv.h"
++
++extern "C" {
++#include <pxp_lib.h>
++}
++
++static uint32_t sComposeSequence;
++static uint32_t sRejectedLayerLogs;
++static uint32_t sComposeFailureLogs;
++
++/*
++ * This HAL advertises HWC 1.5 so SurfaceFlinger supplies standard
++ * surfaceDamage metadata. HWC 1.3 and newer store the source crop as floats;
++ * keep the rest of this legacy integer compositor behind these accessors.
++ */
++static inline int source_crop_left(const hwc_layer_1_t& layer)
++{
++    return static_cast<int>(floorf(layer.sourceCropf.left));
++}
++
++static inline int source_crop_top(const hwc_layer_1_t& layer)
++{
++    return static_cast<int>(floorf(layer.sourceCropf.top));
++}
++
++static inline int source_crop_right(const hwc_layer_1_t& layer)
++{
++    return static_cast<int>(ceilf(layer.sourceCropf.right));
++}
++
++static inline int source_crop_bottom(const hwc_layer_1_t& layer)
++{
++    return static_cast<int>(ceilf(layer.sourceCropf.bottom));
++}
++
++struct DamageBounds {
++    int left;
++    int top;
++    int right;
++    int bottom;
++    bool valid;
++};
++
++// Packed android.view.View policy bits, kept in sync with the stock RIDI ABI.
++static const int32_t EINK_POLICY_UNSPECIFIED = -1;
++static const int32_t EINK_WAVEFORM_MASK = 0x0f;
++static const int32_t EINK_AUTO_MODE_AUTOMATIC = 0x10;
++static const int32_t EINK_UPDATE_MODE_FULL = 0x20;
++static const int32_t EINK_WAIT_MODE_WAIT = 0x40;
++static const int32_t EINK_POLICY_VALID = 0x20000000;
++static const int32_t EINK_POLICY_DISABLE = 0x40000000;
++static const int32_t EINK_POLICY_SYSTEM_DEFAULT = 0x10000000;
++
++typedef int (*set_eink_update_mode_fn)(framebuffer_device_t*, int32_t);
++
++static int eink_waveform_priority(int32_t policy)
++{
++    if ((policy & EINK_AUTO_MODE_AUTOMATIC) != 0)
++        return 50;
++    switch (policy & EINK_WAVEFORM_MASK) {
++    case 2: return 100; // GC16
++    case 7:             // REAGL/GLR16
++    case 8: return 90;  // REAGLD/GLD16
++    case 6: return 80;  // GL16
++    case 3: return 70;  // GC4
++    case 1: return 40;  // DU
++    case 4:             // ANIM
++    case 5: return 30;  // A2
++    default: return 0;
++    }
++}
++
++static int32_t merge_eink_policy(int32_t current, int32_t incoming)
++{
++    if (incoming == EINK_POLICY_UNSPECIFIED ||
++        (incoming & EINK_POLICY_VALID) == 0)
++        return current;
++    if (current == EINK_POLICY_UNSPECIFIED)
++        return incoming;
++    if ((current & EINK_POLICY_DISABLE) != 0)
++        return current;
++    if ((incoming & EINK_POLICY_DISABLE) != 0)
++        return incoming;
++
++    /*
++     * AUTOMATIC belongs to the waveform selector. Preserve it only from the
++     * policy that wins waveform priority so GC16|FULL cannot become AUTO|FULL
++     * when another layer contributes its default automatic mode.
++     */
++    const int32_t waveformSelectorMask =
++            EINK_WAVEFORM_MASK | EINK_AUTO_MODE_AUTOMATIC;
++    const int32_t waveformSelector =
++            eink_waveform_priority(incoming) > eink_waveform_priority(current)
++            ? (incoming & waveformSelectorMask)
++            : (current & waveformSelectorMask);
++    int32_t merged =
++            ((current | incoming) & ~waveformSelectorMask) | waveformSelector;
++    /*
++     * One application request among the composed layers makes the whole frame
++     * application-driven; the system-default marker must not survive it.
++     */
++    if ((current & EINK_POLICY_SYSTEM_DEFAULT) == 0 ||
++        (incoming & EINK_POLICY_SYSTEM_DEFAULT) == 0) {
++        merged &= ~EINK_POLICY_SYSTEM_DEFAULT;
++    }
++    return merged;
++}
++
++static int32_t collect_eink_policy(const hwc_display_contents_1_t* primary)
++{
++    int32_t policy = EINK_POLICY_UNSPECIFIED;
++    if (primary == NULL)
++        return policy;
++    for (size_t i = 0; i < primary->numHwLayers; ++i) {
++        int32_t layerPolicy = EINK_POLICY_UNSPECIFIED;
++        static_assert(sizeof(primary->hwLayers[i].reserved) >= sizeof(layerPolicy),
++                "hwc_layer_1_t reserved area is too small for E Ink policy");
++        memcpy(&layerPolicy, primary->hwLayers[i].reserved,
++                sizeof(layerPolicy));
++        policy = merge_eink_policy(policy, layerPolicy);
++    }
++    return policy;
++}
++
++static void set_epdc_policy(hwc_context_t* ctx,
++        const hwc_display_contents_1_t* primary)
++{
++    if (ctx == NULL || ctx->mFramebuffer == NULL ||
++        ctx->mFramebuffer->reserved_proc[0] == NULL)
++        return;
++
++    const int32_t policy = collect_eink_policy(primary);
++    set_eink_update_mode_fn setPolicy =
++            reinterpret_cast<set_eink_update_mode_fn>(
++                    ctx->mFramebuffer->reserved_proc[0]);
++    const int result = setPolicy(ctx->mFramebuffer, policy);
++    if ((policy != EINK_POLICY_UNSPECIFIED &&
++         (policy & EINK_POLICY_VALID) != 0) || result != 0) {
++        ALOGI("E70Q10_POLICY packed=0x%08x wave=%d full=%d wait=%d disable=%d result=%d",
++                policy, policy & EINK_WAVEFORM_MASK,
++                (policy & EINK_UPDATE_MODE_FULL) != 0,
++                (policy & EINK_WAIT_MODE_WAIT) != 0,
++                (policy & EINK_POLICY_DISABLE) != 0, result);
++    }
++}
++
++/*
++ * Report exactly which layer aborted local composition and why. Without this
++ * the fallback to SurfaceFlinger's framebuffer target is indistinguishable
++ * from a genuinely unsupported layer set, and that fallback costs a full
++ * software screen composition on every frame.
++ */
++static void log_compose_failure(const char* reason, size_t index,
++        const hwc_layer_1_t* layer)
++{
++    if (sComposeFailureLogs >= 40)
++        return;
++    ++sComposeFailureLogs;
++
++    if (layer == NULL) {
++        ALOGE("E70Q10_HWC_FAIL reason=%s layer=%zu", reason, index);
++        return;
++    }
++
++    const private_handle_t* handle = NULL;
++    if (layer->handle != NULL &&
++        private_handle_t::validate(layer->handle) == 0) {
++        handle = reinterpret_cast<const private_handle_t*>(layer->handle);
++    }
++
++    ALOGE("E70Q10_HWC_FAIL reason=%s layer=%zu type=%d handle=%p base=%p "
++          "size=%d crop=%d,%d,%d,%d frame=%d,%d,%d,%d transform=0x%x "
++          "blend=0x%x alpha=%u flags=0x%x",
++          reason, index, layer->compositionType, layer->handle,
++          handle != NULL ? reinterpret_cast<void*>(handle->base) : NULL,
++          handle != NULL ? handle->size : -1,
++          source_crop_left(*layer), source_crop_top(*layer),
++          source_crop_right(*layer), source_crop_bottom(*layer),
++          layer->displayFrame.left, layer->displayFrame.top,
++          layer->displayFrame.right, layer->displayFrame.bottom,
++          layer->transform, layer->blending, layer->planeAlpha,
++          layer->flags);
++}
++
++static void union_damage(DamageBounds* bounds,
++        int left, int top, int right, int bottom)
++{
++    if (bounds == NULL || right <= left || bottom <= top)
++        return;
++    if (!bounds->valid) {
++        bounds->left = left;
++        bounds->top = top;
++        bounds->right = right;
++        bounds->bottom = bottom;
++        bounds->valid = true;
++        return;
++    }
++    bounds->left = std::min(bounds->left, left);
++    bounds->top = std::min(bounds->top, top);
++    bounds->right = std::max(bounds->right, right);
++    bounds->bottom = std::max(bounds->bottom, bottom);
++}
++
++/*
++ * Convert one HWC 1.5 damage rectangle from the pre-transform source buffer
++ * into physical display coordinates. The E70Q10 normally uses ROT_270, but
++ * handle every non-combined HWC transform and conservatively reject unknown
++ * combinations so the caller can request a full layer update.
++ */
++static bool map_damage_to_display(const hwc_layer_1_t& layer,
++        const hwc_rect_t& damage, hwc_rect_t* output)
++{
++    const float cropLeft = layer.sourceCropf.left;
++    const float cropTop = layer.sourceCropf.top;
++    const float cropRight = layer.sourceCropf.right;
++    const float cropBottom = layer.sourceCropf.bottom;
++    const float sourceWidth = cropRight - cropLeft;
++    const float sourceHeight = cropBottom - cropTop;
++    if (output == NULL || sourceWidth <= 0 || sourceHeight <= 0)
++        return false;
++
++    float x0 = std::max(cropLeft, static_cast<float>(damage.left)) - cropLeft;
++    float y0 = std::max(cropTop, static_cast<float>(damage.top)) - cropTop;
++    float x1 = std::min(cropRight, static_cast<float>(damage.right)) - cropLeft;
++    float y1 = std::min(cropBottom, static_cast<float>(damage.bottom)) - cropTop;
++    if (x1 <= x0 || y1 <= y0)
++        return false;
++
++    float tx0;
++    float ty0;
++    float tx1;
++    float ty1;
++    float transformedWidth;
++    float transformedHeight;
++    switch (layer.transform) {
++    case 0:
++        tx0 = x0; ty0 = y0; tx1 = x1; ty1 = y1;
++        transformedWidth = sourceWidth;
++        transformedHeight = sourceHeight;
++        break;
++    case HWC_TRANSFORM_FLIP_H:
++        tx0 = sourceWidth - x1; ty0 = y0;
++        tx1 = sourceWidth - x0; ty1 = y1;
++        transformedWidth = sourceWidth;
++        transformedHeight = sourceHeight;
++        break;
++    case HWC_TRANSFORM_FLIP_V:
++        tx0 = x0; ty0 = sourceHeight - y1;
++        tx1 = x1; ty1 = sourceHeight - y0;
++        transformedWidth = sourceWidth;
++        transformedHeight = sourceHeight;
++        break;
++    case HWC_TRANSFORM_ROT_180:
++        tx0 = sourceWidth - x1; ty0 = sourceHeight - y1;
++        tx1 = sourceWidth - x0; ty1 = sourceHeight - y0;
++        transformedWidth = sourceWidth;
++        transformedHeight = sourceHeight;
++        break;
++    case HWC_TRANSFORM_ROT_90:
++        tx0 = sourceHeight - y1; ty0 = x0;
++        tx1 = sourceHeight - y0; ty1 = x1;
++        transformedWidth = sourceHeight;
++        transformedHeight = sourceWidth;
++        break;
++    case HWC_TRANSFORM_ROT_270:
++        tx0 = y0; ty0 = sourceWidth - x1;
++        tx1 = y1; ty1 = sourceWidth - x0;
++        transformedWidth = sourceHeight;
++        transformedHeight = sourceWidth;
++        break;
++    default:
++        return false;
++    }
++
++    const float displayWidth =
++            layer.displayFrame.right - layer.displayFrame.left;
++    const float displayHeight =
++            layer.displayFrame.bottom - layer.displayFrame.top;
++    if (displayWidth <= 0 || displayHeight <= 0)
++        return false;
++
++    output->left = static_cast<int>(floorf(layer.displayFrame.left +
++            tx0 * displayWidth / transformedWidth));
++    output->top = static_cast<int>(floorf(layer.displayFrame.top +
++            ty0 * displayHeight / transformedHeight));
++    output->right = static_cast<int>(ceilf(layer.displayFrame.left +
++            tx1 * displayWidth / transformedWidth));
++    output->bottom = static_cast<int>(ceilf(layer.displayFrame.top +
++            ty1 * displayHeight / transformedHeight));
++    return output->right > output->left && output->bottom > output->top;
++}
++
++struct PxpComposer {
++    pxp_chan_handle_t channel;
++    pxp_mem_desc input;
++    pxp_mem_desc converted;
++    bool initialized;
++    bool channelRequested;
++};
++
++static uint64_t monotonic_ns()
++{
++    struct timespec now;
++    clock_gettime(CLOCK_MONOTONIC, &now);
++    return static_cast<uint64_t>(now.tv_sec) * 1000000000ULL + now.tv_nsec;
++}
++
++static void destroy_pxp(PxpComposer* pxp)
++{
++    if (pxp == NULL)
++        return;
++    if (pxp->converted.phys_addr != 0)
++        pxp_put_mem(&pxp->converted);
++    if (pxp->input.phys_addr != 0)
++        pxp_put_mem(&pxp->input);
++    if (pxp->initialized) {
++        if (pxp->channelRequested)
++            pxp_release_channel(&pxp->channel);
++        pxp_uninit();
++    }
++    delete pxp;
++}
++
++static PxpComposer* create_pxp()
++{
++    const unsigned sourceWidth = 1404;
++    const unsigned sourceHeight = 1872;
++    PxpComposer* pxp = new PxpComposer();
++    memset(pxp, 0, sizeof(*pxp));
++
++    if (pxp_init() != 0) {
++        ALOGE("E70Q10_PXP initialization failed errno=%d", errno);
++        destroy_pxp(pxp);
++        return NULL;
++    }
++    pxp->initialized = true;
++    if (pxp_request_channel(&pxp->channel) != 0) {
++        ALOGE("E70Q10_PXP channel request failed errno=%d", errno);
++        destroy_pxp(pxp);
++        return NULL;
++    }
++    pxp->channelRequested = true;
++    pxp->input.size = sourceWidth * sourceHeight * sizeof(uint32_t);
++    pxp->input.mtype = MEMORY_TYPE_WC;
++    pxp->converted.size =
++            1888 * 1404 * sizeof(uint16_t);
++    pxp->converted.mtype = MEMORY_TYPE_UNCACHED;
++    if (pxp_get_mem(&pxp->input) != 0 ||
++        pxp_get_mem(&pxp->converted) != 0) {
++        ALOGE("E70Q10_PXP allocation failed errno=%d", errno);
++        destroy_pxp(pxp);
++        return NULL;
++    }
++    ALOGI("E70Q10_PXP ready input=%u output=%u",
++          pxp->input.size, pxp->converted.size);
++    return pxp;
++}
++
++static inline uint8_t expand5(uint16_t value)
++{
++    return (value << 3) | (value >> 2);
++}
++
++static inline uint8_t expand6(uint16_t value)
++{
++    return (value << 2) | (value >> 4);
++}
++
++static inline uint16_t pack565(uint8_t red, uint8_t green, uint8_t blue)
++{
++    return static_cast<uint16_t>(((red & 0xf8) << 8) |
++                                 ((green & 0xfc) << 3) |
++                                 (blue >> 3));
++}
++
++/*
++ * HWC 1.1 does not carry the gralloc pixel format separately.  This legacy
++ * gralloc allocates tightly packed ashmem buffers and records their complete
++ * size in private_handle_t, so the row size gives us both the real stride and
++ * the bytes per pixel.  The framebuffer target is already an opaque,
++ * client-composited image; the fourth byte in RGBX_8888 is deliberately
++ * ignored rather than interpreted as alpha.
++ */
++static bool copy_framebuffer_target(const private_handle_t* sourceHandle,
++        const void* sourceAddress, uint16_t* destination,
++        int width, int height, int destinationStride,
++        int* sourceStrideOut, int* bytesPerPixelOut)
++{
++    if (sourceHandle == NULL || sourceAddress == NULL || height <= 0 ||
++        sourceHandle->size <= 0 ||
++        sourceHandle->size % height != 0) {
++        return false;
++    }
++
++    const int rowBytes = sourceHandle->size / height;
++    int bytesPerPixel = 0;
++    if (rowBytes >= width * 4 && rowBytes % 4 == 0)
++        bytesPerPixel = 4;
++    else if (rowBytes >= width * 2 && rowBytes % 2 == 0)
++        bytesPerPixel = 2;
++    else
++        return false;
++
++    const int sourceStride = rowBytes / bytesPerPixel;
++    const uint8_t* source = reinterpret_cast<const uint8_t*>(sourceAddress);
++    for (int y = 0; y < height; ++y) {
++        uint16_t* output = destination + y * destinationStride;
++        if (bytesPerPixel == 2) {
++            memcpy(output, source + y * rowBytes,
++                   width * sizeof(uint16_t));
++        } else {
++            const uint8_t* input = source + y * rowBytes;
++            for (int x = 0; x < width; ++x) {
++                const uint8_t* pixel = input + x * 4;
++                output[x] = pack565(pixel[0], pixel[1], pixel[2]);
++            }
++        }
++    }
++
++    if (sourceStrideOut != NULL)
++        *sourceStrideOut = sourceStride;
++    if (bytesPerPixelOut != NULL)
++        *bytesPerPixelOut = bytesPerPixel;
++    return true;
++}
++
++/*
++ * PxP rotates and converts the portrait app buffer into the landscape RGB565
++ * EPDC geometry. 1404 is not divisible by PxP v2's 8-pixel rotation block,
++ * so the hardware leaves the first four destination rows blank. Copy the
++ * contiguous result and repair only those four rows on the CPU.
++ */
++static bool compose_layer_pxp(PxpComposer* pxp,
++        const hwc_layer_1_t& layer, uint16_t* destination,
++        int destinationWidth, int destinationHeight, int destinationStride,
++        uint64_t* packNs, uint64_t* pxpNs, uint64_t* copyNs)
++{
++    if (pxp == NULL || layer.handle == NULL ||
++        layer.transform != HWC_TRANSFORM_ROT_270 ||
++        (layer.blending != HWC_BLENDING_NONE &&
++         layer.blending != HWC_BLENDING_PREMULT) ||
++        layer.planeAlpha != 255 ||
++        source_crop_left(layer) != 0 || source_crop_top(layer) != 0 ||
++        layer.displayFrame.left != 0 || layer.displayFrame.top != 0 ||
++        layer.displayFrame.right != destinationWidth ||
++        layer.displayFrame.bottom != destinationHeight) {
++        return false;
++    }
++
++    const int sourceWidth = source_crop_right(layer);
++    const int sourceHeight = source_crop_bottom(layer);
++    if (sourceWidth != destinationHeight ||
++        sourceHeight != destinationWidth) {
++        return false;
++    }
++    const private_handle_t* handle =
++            reinterpret_cast<const private_handle_t*>(layer.handle);
++    if (private_handle_t::validate(layer.handle) < 0 ||
++        handle->base == 0 || handle->size < sourceWidth * sourceHeight * 4 ||
++        pxp->input.size < static_cast<unsigned>(sourceWidth * sourceHeight * 4) ||
++        pxp->converted.size <
++                static_cast<unsigned>(destinationStride *
++                                      destinationHeight * 2)) {
++        return false;
++    }
++
++    const int sourceStride = handle->size /
++            (sourceHeight * static_cast<int>(sizeof(uint32_t)));
++    if (sourceStride < sourceWidth)
++        return false;
++
++    uint64_t start = monotonic_ns();
++    const uint8_t* source =
++            reinterpret_cast<const uint8_t*>(handle->base);
++    uint32_t* staging = reinterpret_cast<uint32_t*>(
++            static_cast<uintptr_t>(pxp->input.virt_uaddr));
++    for (int y = 0; y < sourceHeight; ++y) {
++        const uint8_t* row = source + y * sourceStride * 4;
++        uint32_t* output = staging + y * sourceWidth;
++        for (int x = 0; x < sourceWidth; ++x) {
++            const uint8_t* pixel = row + x * 4;
++            unsigned red = pixel[0];
++            unsigned green = pixel[1];
++            unsigned blue = pixel[2];
++            if (layer.blending == HWC_BLENDING_PREMULT) {
++                const unsigned white = 255 - pixel[3];
++                red = std::min(255U, red + white);
++                green = std::min(255U, green + white);
++                blue = std::min(255U, blue + white);
++            }
++            output[x] = (static_cast<uint32_t>(red) << 16) |
++                        (static_cast<uint32_t>(green) << 8) |
++                        blue;
++        }
++    }
++    *packNs = monotonic_ns() - start;
++
++    pxp_config_data config;
++    memset(&config, 0, sizeof(config));
++    config.s0_param.paddr = pxp->input.phys_addr;
++    config.s0_param.width = sourceWidth;
++    config.s0_param.height = sourceHeight;
++    config.s0_param.stride = sourceWidth;
++    config.s0_param.pixel_fmt = PXP_PIX_FMT_XRGB32;
++    config.s0_param.color_key = static_cast<unsigned>(-1);
++    config.proc_data.srect.width = sourceWidth;
++    config.proc_data.srect.height = sourceHeight;
++    config.out_param.paddr = pxp->converted.phys_addr;
++    config.out_param.width = destinationWidth;
++    config.out_param.height = destinationHeight;
++    config.out_param.stride = destinationStride;
++    config.out_param.pixel_fmt = PXP_PIX_FMT_RGB565;
++    config.proc_data.drect.width = destinationWidth;
++    config.proc_data.drect.height = destinationHeight;
++    config.proc_data.rotate = 270;
++
++    start = monotonic_ns();
++    if (pxp_config_channel(&pxp->channel, &config) != 0 ||
++        pxp_start_channel(&pxp->channel) != 0 ||
++        pxp_wait_for_completion(&pxp->channel, 10) != 0) {
++        ALOGE("E70Q10_PXP conversion failed errno=%d", errno);
++        return false;
++    }
++    *pxpNs = monotonic_ns() - start;
++
++    start = monotonic_ns();
++    const uint16_t* converted = reinterpret_cast<const uint16_t*>(
++            static_cast<uintptr_t>(pxp->converted.virt_uaddr));
++    memcpy(destination, converted,
++           destinationStride * destinationHeight * sizeof(uint16_t));
++    const int pxpMissingRows = 4;
++    for (int outputY = 0; outputY < pxpMissingRows; ++outputY) {
++        const int sourceX = sourceWidth - 1 - outputY;
++        uint16_t* output = destination + outputY * destinationStride;
++        for (int outputX = 0; outputX < destinationWidth; ++outputX) {
++            const uint8_t* pixel =
++                    source + (outputX * sourceStride + sourceX) * 4;
++            unsigned red = pixel[0];
++            unsigned green = pixel[1];
++            unsigned blue = pixel[2];
++            /*
++             * PxP's staging path flattens premultiplied transparency onto
++             * white. Apply the identical rule to the four CPU-repaired rows;
++             * otherwise transparent edge pixels become a black strip (the
++             * panel's right edge after ROT_270) and isolated black dots.
++             */
++            if (layer.blending == HWC_BLENDING_PREMULT) {
++                const unsigned white = 255 - pixel[3];
++                red = std::min(255U, red + white);
++                green = std::min(255U, green + white);
++                blue = std::min(255U, blue + white);
++            }
++            output[outputX] = pack565(red, green, blue);
++        }
++    }
++    *copyNs = monotonic_ns() - start;
++    return true;
++}
++
++static bool map_source_pixel(int transform, int sourceWidth, int sourceHeight,
++        int transformedX, int transformedY, int* sourceX, int* sourceY)
++{
++    switch (transform) {
++    case 0:
++        *sourceX = transformedX;
++        *sourceY = transformedY;
++        break;
++    case HWC_TRANSFORM_FLIP_H:
++        *sourceX = sourceWidth - 1 - transformedX;
++        *sourceY = transformedY;
++        break;
++    case HWC_TRANSFORM_FLIP_V:
++        *sourceX = transformedX;
++        *sourceY = sourceHeight - 1 - transformedY;
++        break;
++    case HWC_TRANSFORM_ROT_180:
++        *sourceX = sourceWidth - 1 - transformedX;
++        *sourceY = sourceHeight - 1 - transformedY;
++        break;
++    case HWC_TRANSFORM_ROT_90:
++        *sourceX = transformedY;
++        *sourceY = sourceHeight - 1 - transformedX;
++        break;
++    case HWC_TRANSFORM_FLIP_H | HWC_TRANSFORM_ROT_90:
++        *sourceX = transformedY;
++        *sourceY = transformedX;
++        break;
++    case HWC_TRANSFORM_FLIP_V | HWC_TRANSFORM_ROT_90:
++        *sourceX = sourceWidth - 1 - transformedY;
++        *sourceY = sourceHeight - 1 - transformedX;
++        break;
++    case HWC_TRANSFORM_ROT_270:
++        *sourceX = sourceWidth - 1 - transformedY;
++        *sourceY = transformedX;
++        break;
++    default:
++        return false;
++    }
++    return *sourceX >= 0 && *sourceX < sourceWidth &&
++           *sourceY >= 0 && *sourceY < sourceHeight;
++}
++
++/*
++ * The E70Q10 has no GLES2-capable GPU. Applications render their Views with
++ * CPU Skia into RGBA buffers. Compose the fullscreen buffers here so
++ * SurfaceFlinger does not need its GLES2 RenderEngine merely to reach the
++ * RGB565 EPDC framebuffer.
++ *
++ * This first bring-up path intentionally accepts only uncropped, four-byte
++ * buffers. Cropped wallpaper and video layers stay disabled until their
++ * allocation geometry can be supplied explicitly or handled by PxP.
++ */
++static bool compose_layer_software(const hwc_layer_1_t& layer,
++        uint16_t* destination, int destinationWidth, int destinationHeight,
++        int destinationStride)
++{
++    if (layer.handle == NULL) {
++        return false;
++    }
++
++    const int cropLeft = source_crop_left(layer);
++    const int cropTop = source_crop_top(layer);
++    const int sourceWidth = source_crop_right(layer) - cropLeft;
++    const int sourceHeight = source_crop_bottom(layer) - cropTop;
++    const int outputLeft = layer.displayFrame.left;
++    const int outputTop = layer.displayFrame.top;
++    const int outputRight = layer.displayFrame.right;
++    const int outputBottom = layer.displayFrame.bottom;
++    const int outputWidth = outputRight - outputLeft;
++    const int outputHeight = outputBottom - outputTop;
++    if (sourceWidth <= 0 || sourceHeight <= 0 ||
++        outputWidth <= 0 || outputHeight <= 0) {
++        return false;
++    }
++
++    const private_handle_t* handle =
++            reinterpret_cast<const private_handle_t*>(layer.handle);
++    if (private_handle_t::validate(layer.handle) < 0)
++        return false;
++
++    /*
++     * NXP gralloc does not store width/height in its native handle. Its
++     * Android View buffers use an unpadded 32-bit stride, so crop.right is
++     * the smallest valid source stride. Oversized wallpaper buffers are
++     * filtered separately and never enter this path.
++     */
++    const int sourceStride = source_crop_right(layer);
++    const size_t minimumBytes =
++            static_cast<size_t>(sourceStride) *
++            source_crop_bottom(layer) * sizeof(uint32_t);
++    if (handle->size < static_cast<int>(minimumBytes))
++        return false;
++
++    const uint8_t* source = reinterpret_cast<const uint8_t*>(handle->base);
++    if (source == NULL)
++        return false;
++
++    const bool rotated = (layer.transform & HWC_TRANSFORM_ROT_90) != 0;
++    const int transformedWidth = rotated ? sourceHeight : sourceWidth;
++    const int transformedHeight = rotated ? sourceWidth : sourceHeight;
++    const int clippedLeft = outputLeft < 0 ? 0 : outputLeft;
++    const int clippedTop = outputTop < 0 ? 0 : outputTop;
++    const int clippedRight =
++            outputRight > destinationWidth ? destinationWidth : outputRight;
++    const int clippedBottom =
++            outputBottom > destinationHeight ? destinationHeight : outputBottom;
++    const bool blend = layer.blending == HWC_BLENDING_PREMULT;
++    const unsigned planeAlpha = layer.planeAlpha;
++
++    for (int y = clippedTop; y < clippedBottom; ++y) {
++        const int transformedY =
++                static_cast<int>((static_cast<int64_t>(y - outputTop) *
++                                  transformedHeight) / outputHeight);
++        uint16_t* output = destination + y * destinationStride;
++        for (int x = clippedLeft; x < clippedRight; ++x) {
++            const int transformedX =
++                    static_cast<int>((static_cast<int64_t>(x - outputLeft) *
++                                      transformedWidth) / outputWidth);
++            int sourceX;
++            int sourceY;
++            if (!map_source_pixel(layer.transform, sourceWidth, sourceHeight,
++                                  transformedX, transformedY,
++                                  &sourceX, &sourceY)) {
++                continue;
++            }
++            sourceX += cropLeft;
++            sourceY += cropTop;
++
++            const uint8_t* pixel =
++                    source + (sourceY * sourceStride + sourceX) * 4;
++            unsigned alpha = blend ? pixel[3] : 255;
++            alpha = (alpha * planeAlpha + 127) / 255;
++            if (alpha == 0)
++                continue;
++
++            unsigned red = (pixel[0] * planeAlpha + 127) / 255;
++            unsigned green = (pixel[1] * planeAlpha + 127) / 255;
++            unsigned blue = (pixel[2] * planeAlpha + 127) / 255;
++            if (alpha < 255) {
++                const uint16_t old = output[x];
++                const unsigned inverse = 255 - alpha;
++                red += (expand5((old >> 11) & 0x1f) * inverse + 127) / 255;
++                green += (expand6((old >> 5) & 0x3f) * inverse + 127) / 255;
++                blue += (expand5(old & 0x1f) * inverse + 127) / 255;
++            }
++            output[x] = pack565(red > 255 ? 255 : red,
++                                green > 255 ? 255 : green,
++                                blue > 255 ? 255 : blue);
++        }
++    }
++    return true;
++}
++
++static bool can_compose_layer_software(const hwc_layer_1_t& layer)
++{
++    if (layer.compositionType == HWC_BACKGROUND)
++        return true;
++    if (layer.handle == NULL ||
++        source_crop_left(layer) < 0 || source_crop_top(layer) < 0 ||
++        source_crop_right(layer) <= 0 || source_crop_bottom(layer) <= 0 ||
++        source_crop_right(layer) <= source_crop_left(layer) ||
++        source_crop_bottom(layer) <= source_crop_top(layer) ||
++        layer.displayFrame.right <= layer.displayFrame.left ||
++        layer.displayFrame.bottom <= layer.displayFrame.top ||
++        (layer.blending != HWC_BLENDING_NONE &&
++         layer.blending != HWC_BLENDING_PREMULT) ||
++        layer.transform > HWC_TRANSFORM_ROT_270) {
++        return false;
++    }
++
++    const private_handle_t* handle =
++            reinterpret_cast<const private_handle_t*>(layer.handle);
++    if (private_handle_t::validate(layer.handle) < 0)
++        return false;
++
++    const size_t minimumBytes =
++            static_cast<size_t>(source_crop_right(layer)) *
++            source_crop_bottom(layer) * sizeof(uint32_t);
++    return handle->size >= static_cast<int>(minimumBytes);
++}
++
++/*
++ * The reader policy uses a plain white background and disables rotation
++ * screenshots/animations. Ignore the legacy oversized wallpaper crop and
++ * bufferless transition surfaces instead of forcing SurfaceFlinger's GLES2
++ * fallback for layers that intentionally contribute no reader UI.
++ */
++static bool can_ignore_reader_layer(const hwc_layer_1_t& layer,
++        int displayWidth, int displayHeight)
++{
++    if (layer.compositionType == HWC_BACKGROUND || layer.handle == NULL)
++        return true;
++
++    return (source_crop_left(layer) > 0 || source_crop_top(layer) > 0) &&
++           layer.displayFrame.left <= 0 && layer.displayFrame.top <= 0 &&
++           layer.displayFrame.right >= displayWidth &&
++           layer.displayFrame.bottom >= displayHeight &&
++           layer.blending == HWC_BLENDING_NONE && layer.planeAlpha == 255;
++}
++
++static void clamp_damage(DamageBounds* bounds,
++        int displayWidth, int displayHeight)
++{
++    if (bounds == NULL || !bounds->valid)
++        return;
++    bounds->left = std::max(0, bounds->left);
++    bounds->top = std::max(0, bounds->top);
++    bounds->right = std::min(displayWidth, bounds->right);
++    bounds->bottom = std::min(displayHeight, bounds->bottom);
++    if (bounds->right <= bounds->left || bounds->bottom <= bounds->top)
++        bounds->valid = false;
++}
++
++enum TargetDamageState {
++    TARGET_DAMAGE_ABSENT = 0,   /* no framebuffer target in this frame */
++    TARGET_DAMAGE_UNKNOWN,      /* target present, damage not described */
++    TARGET_DAMAGE_NONE,         /* target present, explicitly nothing changed */
++    TARGET_DAMAGE_VALID         /* usable rectangle */
++};
++
++/*
++ * Read SurfaceFlinger's display composition damage from the framebuffer target
++ * layer. HWComposer::setFramebufferTargetDamage() publishes it there.
++ *
++ * This is the accurate rectangle for E Ink. Producer damage from an individual
++ * layer only describes what that layer repainted; it cannot describe the area a
++ * layer stopped covering. SurfaceFlinger's region unions a layer's previous and
++ * current visible regions, so a moving object, a dismissed popup and a closed
++ * window all arrive with their old pixels included, which is exactly what a
++ * partial waveform needs in order not to leave residue.
++ *
++ * These rectangles are already in physical display coordinates: SurfaceFlinger
++ * applies the display's global transform (orientation 3 on this device) before
++ * handing the region over. No further mapping is allowed here.
++ */
++static TargetDamageState collect_target_damage(
++        const hwc_display_contents_1_t* primary,
++        int displayWidth, int displayHeight, DamageBounds* out)
++{
++    if (primary == NULL || out == NULL)
++        return TARGET_DAMAGE_ABSENT;
++
++    const hwc_layer_1_t* target = NULL;
++    for (size_t i = 0; i < primary->numHwLayers; ++i) {
++        if (primary->hwLayers[i].compositionType == HWC_FRAMEBUFFER_TARGET) {
++            target = &primary->hwLayers[i];
++            break;
++        }
++    }
++    if (target == NULL)
++        return TARGET_DAMAGE_ABSENT;
++
++    if (target->surfaceDamage.numRects == 0 ||
++        target->surfaceDamage.rects == NULL) {
++        return TARGET_DAMAGE_UNKNOWN;
++    }
++
++    DamageBounds bounds = {0, 0, 0, 0, false};
++    for (size_t i = 0; i < target->surfaceDamage.numRects; ++i) {
++        const hwc_rect_t& rect = target->surfaceDamage.rects[i];
++        union_damage(&bounds, rect.left, rect.top, rect.right, rect.bottom);
++    }
++    clamp_damage(&bounds, displayWidth, displayHeight);
++    if (!bounds.valid)
++        return TARGET_DAMAGE_NONE;
++
++    *out = bounds;
++    return TARGET_DAMAGE_VALID;
++}
++
++static DamageBounds collect_display_damage(
++        const hwc_display_contents_1_t* primary,
++        int displayWidth, int displayHeight)
++{
++    DamageBounds bounds = {0, 0, 0, 0, false};
++    if (primary == NULL)
++        return bounds;
++
++    for (size_t i = 0; i < primary->numHwLayers; ++i) {
++        const hwc_layer_1_t& layer = primary->hwLayers[i];
++        if (layer.compositionType == HWC_FRAMEBUFFER_TARGET ||
++            layer.compositionType == HWC_BACKGROUND ||
++            can_ignore_reader_layer(layer, displayWidth, displayHeight)) {
++            continue;
++        }
++
++        /*
++         * HWC 1.5 represents unknown/full-buffer damage with zero rects and
++         * unchanged content with one empty rect. Unknown damage must never be
++         * skipped on E Ink: update the complete displayed layer.
++         */
++        if (layer.surfaceDamage.numRects == 0 ||
++            layer.surfaceDamage.rects == NULL) {
++            union_damage(&bounds, layer.displayFrame.left,
++                    layer.displayFrame.top, layer.displayFrame.right,
++                    layer.displayFrame.bottom);
++            continue;
++        }
++
++        for (size_t rectIndex = 0;
++             rectIndex < layer.surfaceDamage.numRects; ++rectIndex) {
++            const hwc_rect_t& damage =
++                    layer.surfaceDamage.rects[rectIndex];
++            if (damage.right <= damage.left ||
++                damage.bottom <= damage.top) {
++                continue;
++            }
++            hwc_rect_t mapped;
++            if (!map_damage_to_display(layer, damage, &mapped)) {
++                union_damage(&bounds, layer.displayFrame.left,
++                        layer.displayFrame.top, layer.displayFrame.right,
++                        layer.displayFrame.bottom);
++                break;
++            }
++            union_damage(&bounds, mapped.left, mapped.top,
++                    mapped.right, mapped.bottom);
++        }
++    }
++
++    clamp_damage(&bounds, displayWidth, displayHeight);
++    return bounds;
++}
++
++static void set_epdc_damage(hwc_context_t* ctx,
++        const hwc_display_contents_1_t* primary)
++{
++    if (ctx == NULL || ctx->mFramebuffer == NULL ||
++        ctx->mFramebuffer->setUpdateRect == NULL) {
++        return;
++    }
++
++    const int displayWidth = ctx->mFramebuffer->width;
++    const int displayHeight = ctx->mFramebuffer->height;
++
++    DamageBounds damage = {0, 0, 0, 0, false};
++    const char* source = "target";
++    const TargetDamageState targetState = collect_target_damage(primary,
++            displayWidth, displayHeight, &damage);
++
++    switch (targetState) {
++    case TARGET_DAMAGE_VALID:
++        break;
++    case TARGET_DAMAGE_NONE:
++        /*
++         * SurfaceFlinger states that nothing changed. Leave the one-shot
++         * rectangle unset so the framebuffer HAL's shadow comparison decides,
++         * and never turn an idle frame into a full refresh.
++         */
++        if (sComposeSequence < 20) {
++            ALOGI("E70Q10_DAMAGE none post=%u", sComposeSequence);
++        }
++        return;
++    case TARGET_DAMAGE_UNKNOWN:
++        /*
++         * Damage was not described for this frame (first frames, forced
++         * repaint). Refresh the whole panel rather than guessing.
++         */
++        damage.left = 0;
++        damage.top = 0;
++        damage.right = displayWidth;
++        damage.bottom = displayHeight;
++        damage.valid = true;
++        source = "unknown";
++        break;
++    case TARGET_DAMAGE_ABSENT:
++    default:
++        /*
++         * No framebuffer target in this frame: the HWC is presenting its own
++         * composed canvas. Fall back to per-layer producer damage.
++         */
++        damage = collect_display_damage(primary, displayWidth, displayHeight);
++        source = "layer";
++        break;
++    }
++
++    if (!damage.valid)
++        return;
++
++    const int result = ctx->mFramebuffer->setUpdateRect(ctx->mFramebuffer,
++            damage.left, damage.top, damage.right - damage.left,
++            damage.bottom - damage.top);
++    if (sComposeSequence < 20 || (sComposeSequence % 120) == 0 ||
++            result != 0) {
++        ALOGI("E70Q10_DAMAGE src=%s physical=%d,%d %dx%d result=%d",
++                source, damage.left, damage.top,
++                damage.right - damage.left,
++                damage.bottom - damage.top, result);
++    }
++}
+ 
+ /*****************************************************************************/
+ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+@@ -62,10 +1016,10 @@ static void dump_layer(hwc_layer_1_t const* l)
+ {
+     ALOGD("\ttype=%d, flags=%08x, handle=%p, tr=%02x, blend=%04x, {%d,%d,%d,%d}, {%d,%d,%d,%d}",
+             l->compositionType, l->flags, l->handle, l->transform, l->blending,
+-            l->sourceCrop.left,
+-            l->sourceCrop.top,
+-            l->sourceCrop.right,
+-            l->sourceCrop.bottom,
++            source_crop_left(*l),
++            source_crop_top(*l),
++            source_crop_right(*l),
++            source_crop_bottom(*l),
+             l->displayFrame.left,
+             l->displayFrame.top,
+             l->displayFrame.right,
+@@ -81,7 +1035,53 @@ static int hwc_prepare(hwc_composer_device_1_t *dev,
+         return 0;
+     }
+ 
+-    // don't need to do anything here.
++    hwc_display_contents_1_t* primary = displays[0];
++    if (primary == NULL)
++        return 0;
++
++    const int displayWidth = ctx->mFramebuffer != NULL ?
++            ctx->mFramebuffer->width : 0;
++    const int displayHeight = ctx->mFramebuffer != NULL ?
++            ctx->mFramebuffer->height : 0;
++    bool composeAll = displayWidth > 0 && displayHeight > 0;
++    for (size_t i = 0; i < primary->numHwLayers; ++i) {
++        hwc_layer_1_t& layer = primary->hwLayers[i];
++        if (layer.compositionType == HWC_FRAMEBUFFER_TARGET)
++            continue;
++        if (!can_compose_layer_software(layer) &&
++            !can_ignore_reader_layer(layer, displayWidth, displayHeight)) {
++            if (sRejectedLayerLogs < 20) {
++                const private_handle_t* handle =
++                        reinterpret_cast<const private_handle_t*>(layer.handle);
++                ALOGW("E70Q10_HWC_REJECT type=%d handle=%p size=%d "
++                      "crop=%d,%d,%d,%d frame=%d,%d,%d,%d "
++                      "transform=0x%x blend=0x%x alpha=%u flags=0x%x",
++                      layer.compositionType, layer.handle,
++                      layer.handle != NULL &&
++                              private_handle_t::validate(layer.handle) == 0 ?
++                              handle->size : -1,
++                      source_crop_left(layer), source_crop_top(layer),
++                      source_crop_right(layer), source_crop_bottom(layer),
++                      layer.displayFrame.left, layer.displayFrame.top,
++                      layer.displayFrame.right, layer.displayFrame.bottom,
++                      layer.transform, layer.blending, layer.planeAlpha,
++                      layer.flags);
++                ++sRejectedLayerLogs;
++            }
++            composeAll = false;
++            break;
++        }
++    }
++
++    for (size_t i = 0; i < primary->numHwLayers; ++i) {
++        hwc_layer_1_t& layer = primary->hwLayers[i];
++        if (layer.compositionType == HWC_FRAMEBUFFER_TARGET)
++            continue;
++        if (layer.compositionType != HWC_BACKGROUND)
++            layer.compositionType =
++                    composeAll ? HWC_OVERLAY : HWC_FRAMEBUFFER;
++        layer.hints = 0;
++    }
+     return 0;
+ }
+ 
+@@ -89,8 +1089,6 @@ static int hwc_set(hwc_composer_device_1_t *dev,
+         size_t numDisplays, hwc_display_contents_1_t** displays)
+ {
+     struct hwc_context_t *ctx = (struct hwc_context_t *)dev;
+-    EGLBoolean success = EGL_TRUE;
+-
+     if (ctx == NULL || numDisplays == 0 || displays == NULL) {
+         return 0;
+     }
+@@ -100,17 +1098,202 @@ static int hwc_set(hwc_composer_device_1_t *dev,
+         return 0;
+     }
+ 
+-    // only need to do swap buffers.
+-    if (displays[0]->dpy != NULL && displays[0]->sur != NULL) {
+-        success = eglSwapBuffers((EGLDisplay)displays[0]->dpy,
+-            (EGLSurface)displays[0]->sur);
++    hwc_display_contents_1_t* primary = displays[0];
++    if (primary == NULL || ctx->mGralloc == NULL ||
++        ctx->mFramebuffer == NULL) {
++        if (primary != NULL && primary->dpy != NULL && primary->sur != NULL &&
++            !eglSwapBuffers((EGLDisplay)primary->dpy,
++                            (EGLSurface)primary->sur)) {
++            return HWC_EGL_ERROR;
++        }
++        return 0;
+     }
+ 
+-    if (!success) {
+-        return HWC_EGL_ERROR;
++    buffer_handle_t target = NULL;
++    bool hasOverlay = false;
++    for (size_t i = 0; i < primary->numHwLayers; ++i) {
++        hwc_layer_1_t& layer = primary->hwLayers[i];
++        if (layer.acquireFenceFd >= 0) {
++            if (sync_wait(layer.acquireFenceFd, 3000) < 0)
++                ALOGE("E70Q10_HWC acquire fence timeout layer=%zu errno=%d",
++                      i, errno);
++            close(layer.acquireFenceFd);
++            layer.acquireFenceFd = -1;
++        }
++        layer.releaseFenceFd = -1;
++        if (layer.compositionType == HWC_FRAMEBUFFER_TARGET)
++            target = layer.handle;
++        else if (layer.compositionType == HWC_OVERLAY ||
++                 layer.compositionType == HWC_BACKGROUND)
++            hasOverlay = true;
+     }
++    primary->retireFenceFd = -1;
+ 
+-    return 0;
++    /*
++     * Preserve the one-shot policy and SurfaceFlinger's producer damage before
++     * posting either the locally composed RGB565 canvas or framebuffer target.
++     * Both describe this exact HWC contents list.
++     */
++    set_epdc_policy(ctx, primary);
++    set_epdc_damage(ctx, primary);
++
++    if (hasOverlay && ctx->mOutputBuffer != NULL) {
++        void* outputAddress = NULL;
++        const int outputWidth = ctx->mFramebuffer->width;
++        const int outputHeight = ctx->mFramebuffer->height;
++        int result = ctx->mGralloc->lock(ctx->mGralloc,
++                ctx->mOutputBuffer, GRALLOC_USAGE_SW_WRITE_OFTEN,
++                0, 0, ctx->mOutputStride, outputHeight, &outputAddress);
++        bool composed = result == 0 && outputAddress != NULL;
++        if (!composed) {
++            ALOGE("E70Q10_HWC_FAIL reason=output_lock result=%d address=%p",
++                    result, outputAddress);
++        }
++        uint64_t packNs = 0;
++        uint64_t pxpNs = 0;
++        uint64_t copyNs = 0;
++        uint64_t softwareStart = monotonic_ns();
++
++        if (composed) {
++            uint16_t* output = reinterpret_cast<uint16_t*>(outputAddress);
++            std::fill(output, output + ctx->mOutputStride * outputHeight,
++                      static_cast<uint16_t>(0xffff));
++
++            for (size_t i = 0; i < primary->numHwLayers; ++i) {
++                hwc_layer_1_t& layer = primary->hwLayers[i];
++                if (layer.compositionType == HWC_FRAMEBUFFER_TARGET ||
++                    layer.compositionType == HWC_BACKGROUND)
++                    continue;
++                /*
++                 * Test ignorability first. SurfaceFlinger keeps bufferless dim
++                 * layers as client composition and re-stamps them
++                 * HWC_FRAMEBUFFER with HWC_SKIP_LAYER after prepare() returned
++                 * HWC_OVERLAY. Such a layer contributes no reader pixels, so
++                 * checking the composition type before ignorability made every
++                 * dialog frame abort local composition and fall back to a full
++                 * software screen composition.
++                 */
++                if (can_ignore_reader_layer(layer, outputWidth, outputHeight))
++                    continue;
++                if (layer.compositionType != HWC_OVERLAY) {
++                    log_compose_failure("not_overlay", i, &layer);
++                    composed = false;
++                    break;
++                }
++
++                const int sourceWidth =
++                        source_crop_right(layer) - source_crop_left(layer);
++                const int sourceHeight =
++                        source_crop_bottom(layer) - source_crop_top(layer);
++                void* sourceAddress = NULL;
++                result = ctx->mGralloc->lock(ctx->mGralloc, layer.handle,
++                        GRALLOC_USAGE_SW_READ_OFTEN, 0, 0,
++                        sourceWidth, sourceHeight, &sourceAddress);
++                if (result != 0 || sourceAddress == NULL) {
++                    /*
++                     * gralloc_lock() reports success even when the handle was
++                     * never mapped in this process, so a NULL address here is
++                     * a real failure and not a lock error code.
++                     */
++                    log_compose_failure(result != 0 ? "lock_error"
++                                                    : "lock_null_base",
++                            i, &layer);
++                    composed = false;
++                    break;
++                }
++
++                bool layerComposed = compose_layer_pxp(ctx->mPxp, layer,
++                        output, outputWidth, outputHeight,
++                        ctx->mOutputStride, &packNs, &pxpNs, &copyNs);
++                if (!layerComposed) {
++                    layerComposed = compose_layer_software(layer, output,
++                            outputWidth, outputHeight, ctx->mOutputStride);
++                }
++                ctx->mGralloc->unlock(ctx->mGralloc, layer.handle);
++                if (!layerComposed) {
++                    log_compose_failure("compose_unsupported", i, &layer);
++                    composed = false;
++                    break;
++                }
++            }
++        }
++
++        if (outputAddress != NULL)
++            ctx->mGralloc->unlock(ctx->mGralloc, ctx->mOutputBuffer);
++        if (composed) {
++            result = ctx->mFramebuffer->post(ctx->mFramebuffer,
++                                             ctx->mOutputBuffer);
++            const uint32_t sequence = ++sComposeSequence;
++            if (sequence <= 20 || result != 0) {
++                ALOGI("E70Q10_HWC_COMPOSE seq=%u layers=%zu "
++                      "total_ms=%.1f pack_ms=%.1f pxp_ms=%.1f copy_ms=%.1f "
++                      "result=%d",
++                      sequence, primary->numHwLayers,
++                      (monotonic_ns() - softwareStart) / 1000000.0,
++                      packNs / 1000000.0, pxpNs / 1000000.0,
++                      copyNs / 1000000.0, result);
++            }
++            return result;
++        }
++        /*
++         * Falling back means SurfaceFlinger has to compose the whole screen in
++         * software, so record the complete layer set for the first failures.
++         */
++        if (sComposeFailureLogs < 40) {
++            ALOGE("E70Q10_HWC_COMPOSE failed, using framebuffer target "
++                  "layers=%zu", primary->numHwLayers);
++            for (size_t i = 0; i < primary->numHwLayers; ++i) {
++                const hwc_layer_1_t& layer = primary->hwLayers[i];
++                const private_handle_t* handle = NULL;
++                if (layer.handle != NULL &&
++                    private_handle_t::validate(layer.handle) == 0) {
++                    handle = reinterpret_cast<const private_handle_t*>(
++                            layer.handle);
++                }
++                ALOGE("E70Q10_HWC_FAIL_LAYER layer=%zu type=%d handle=%p "
++                      "base=%p size=%d crop=%d,%d,%d,%d frame=%d,%d,%d,%d "
++                      "transform=0x%x blend=0x%x alpha=%u ignored=%d",
++                      i, layer.compositionType, layer.handle,
++                      handle != NULL ?
++                              reinterpret_cast<void*>(handle->base) : NULL,
++                      handle != NULL ? handle->size : -1,
++                      source_crop_left(layer), source_crop_top(layer),
++                      source_crop_right(layer), source_crop_bottom(layer),
++                      layer.displayFrame.left, layer.displayFrame.top,
++                      layer.displayFrame.right, layer.displayFrame.bottom,
++                      layer.transform, layer.blending, layer.planeAlpha,
++                      can_ignore_reader_layer(layer, ctx->mFramebuffer->width,
++                              ctx->mFramebuffer->height) ? 1 : 0);
++            }
++            ++sComposeFailureLogs;
++        } else {
++            ALOGE("E70Q10_HWC_COMPOSE failed, using framebuffer target");
++        }
++    }
++
++    /*
++     * This is the recovered stock boundary: HWC does not inspect, convert or
++     * compose the target. The framebuffer HAL either page-flips an fb-backed
++     * RGB565 handle or performs its own fallback copy, then applies the EPDC
++     * update policy. The same handle is posted again on every set(); fence -1
++     * is not treated as an unchanged-frame signal.
++     */
++    if (target == NULL)
++        return 0;
++    const int result = ctx->mFramebuffer->post(ctx->mFramebuffer, target);
++    const uint32_t sequence = ++sComposeSequence;
++    if (sequence <= 20 || result != 0) {
++        const private_handle_t* handle =
++                reinterpret_cast<const private_handle_t*>(target);
++        ALOGI("E70Q10_STOCK_PATH seq=%u target=%p size=%d flags=0x%x "
++              "fb=%dx%d stride=%d format=%d result=%d",
++              sequence, target,
++              private_handle_t::validate(target) == 0 ? handle->size : -1,
++              private_handle_t::validate(target) == 0 ? handle->flags : -1,
++              ctx->mFramebuffer->width, ctx->mFramebuffer->height,
++              ctx->mFramebuffer->stride, ctx->mFramebuffer->format, result);
++    }
++    return result;
+ }
+ 
+ static void hwc_registerProcs(struct hwc_composer_device_1 *dev,
+@@ -138,6 +1321,9 @@ static int hwc_eventControl(struct hwc_composer_device_1* dev,
+         case HWC_EVENT_VSYNC:
+             // enable/disable vsync thread.
+             ctx->mVsyncThread->setEnabled(enabled);
++            ALOGI("E70Q10_HWC vsync %s period_ns=%lld",
++                  enabled ? "enabled" : "disabled",
++                  static_cast<long long>(ctx->mVsyncPeriod));
+             break;
+         default:
+             ret = -EINVAL;
+@@ -147,6 +1333,58 @@ static int hwc_eventControl(struct hwc_composer_device_1* dev,
+     return ret;
+ }
+ 
++static int hwc_getDisplayConfigs(struct hwc_composer_device_1* dev,
++        int disp, uint32_t* configs, size_t* numConfigs)
++{
++    hwc_context_t* ctx = reinterpret_cast<hwc_context_t*>(dev);
++    if (ctx == NULL || numConfigs == NULL ||
++        disp != HWC_DISPLAY_PRIMARY) {
++        return -EINVAL;
++    }
++    if (configs == NULL || *numConfigs == 0) {
++        *numConfigs = 1;
++        return 0;
++    }
++    configs[0] = 0;
++    *numConfigs = 1;
++    return 0;
++}
++
++static int hwc_getDisplayAttributes(struct hwc_composer_device_1* dev,
++        int disp, uint32_t config, const uint32_t* attributes,
++        int32_t* values)
++{
++    hwc_context_t* ctx = reinterpret_cast<hwc_context_t*>(dev);
++    if (ctx == NULL || ctx->mFramebuffer == NULL ||
++        disp != HWC_DISPLAY_PRIMARY || config != 0 ||
++        attributes == NULL || values == NULL) {
++        return -EINVAL;
++    }
++
++    for (size_t i = 0; attributes[i] != HWC_DISPLAY_NO_ATTRIBUTE; ++i) {
++        switch (attributes[i]) {
++        case HWC_DISPLAY_VSYNC_PERIOD:
++            values[i] = ctx->mVsyncPeriod;
++            break;
++        case HWC_DISPLAY_WIDTH:
++            values[i] = ctx->mFramebuffer->width;
++            break;
++        case HWC_DISPLAY_HEIGHT:
++            values[i] = ctx->mFramebuffer->height;
++            break;
++        case HWC_DISPLAY_DPI_X:
++            values[i] = static_cast<int32_t>(ctx->mFramebuffer->xdpi * 1000);
++            break;
++        case HWC_DISPLAY_DPI_Y:
++            values[i] = static_cast<int32_t>(ctx->mFramebuffer->ydpi * 1000);
++            break;
++        default:
++            return -EINVAL;
++        }
++    }
++    return 0;
++}
++
+ static int hwc_blank(struct hwc_composer_device_1* dev, int disp, int blank)
+ {
+     struct hwc_context_t* ctx = (struct hwc_context_t*)dev;
+@@ -179,6 +1417,35 @@ static int hwc_blank(struct hwc_composer_device_1* dev, int disp, int blank)
+     return 0;
+ }
+ 
++static int hwc_setPowerMode(struct hwc_composer_device_1* dev,
++        int disp, int mode)
++{
++    if (mode != HWC_POWER_MODE_OFF &&
++        mode != HWC_POWER_MODE_NORMAL &&
++        mode != HWC_POWER_MODE_DOZE &&
++        mode != HWC_POWER_MODE_DOZE_SUSPEND) {
++        return -EINVAL;
++    }
++    return hwc_blank(dev, disp, mode == HWC_POWER_MODE_OFF ? 1 : 0);
++}
++
++static int hwc_getActiveConfig(struct hwc_composer_device_1* dev, int disp)
++{
++    hwc_context_t* ctx = reinterpret_cast<hwc_context_t*>(dev);
++    if (ctx == NULL || disp != HWC_DISPLAY_PRIMARY)
++        return HWC_ERROR;
++    return 0;
++}
++
++static int hwc_setActiveConfig(struct hwc_composer_device_1* dev,
++        int disp, int index)
++{
++    hwc_context_t* ctx = reinterpret_cast<hwc_context_t*>(dev);
++    if (ctx == NULL || disp != HWC_DISPLAY_PRIMARY || index != 0)
++        return -EINVAL;
++    return 0;
++}
++
+ static int hwc_query(struct hwc_composer_device_1 *dev,
+                      int what, int* value)
+ {
+@@ -189,8 +1456,9 @@ static int hwc_query(struct hwc_composer_device_1 *dev,
+ 
+     switch (what) {
+         case HWC_BACKGROUND_LAYER_SUPPORTED:
+-            // we don't support the background layer yet
+-            value[0] = 0;
++            // Handle bufferless dim/background layers without GLES. The
++            // first bring-up compositor leaves them transparent.
++            value[0] = 1;
+             break;
+         case HWC_VSYNC_PERIOD:
+             // vsync period in nanosecond
+@@ -221,6 +1489,19 @@ static int hwc_device_close(struct hw_device_t *dev)
+     if (ctx->mFbFile > 0) {
+         close(ctx->mFbFile);
+     }
++    if (ctx->mFramebuffer != NULL) {
++        framebuffer_close(ctx->mFramebuffer);
++        ctx->mFramebuffer = NULL;
++    }
++    if (ctx->mAllocator != NULL) {
++        if (ctx->mOutputBuffer != NULL)
++            ctx->mAllocator->free(ctx->mAllocator, ctx->mOutputBuffer);
++        gralloc_close(ctx->mAllocator);
++        ctx->mAllocator = NULL;
++        ctx->mOutputBuffer = NULL;
++    }
++    destroy_pxp(ctx->mPxp);
++    ctx->mPxp = NULL;
+     free(ctx);
+ 
+     return 0;
+@@ -251,14 +1532,56 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+ 
+     dev->device.prepare = hwc_prepare;
+     dev->device.set = hwc_set;
+-    dev->device.blank = hwc_blank;
+-    dev->device.common.version = HWC_DEVICE_API_VERSION_1_0;
++    dev->device.setPowerMode = hwc_setPowerMode;
++    /*
++     * HWC 1.5 supplies standard per-layer surfaceDamage. Stock KitKat carried
++     * equivalent E Ink rectangles through a private BufferQueue extension;
++     * use the standard Oreo ABI instead of reconstructing damage from fb0.
++     */
++    dev->device.common.version = HWC_DEVICE_API_VERSION_1_5;
+     dev->device.registerProcs = hwc_registerProcs;
+     dev->device.eventControl = hwc_eventControl;
+     dev->device.query = hwc_query;
++    dev->device.getDisplayConfigs = hwc_getDisplayConfigs;
++    dev->device.getDisplayAttributes = hwc_getDisplayAttributes;
++    dev->device.getActiveConfig = hwc_getActiveConfig;
++    dev->device.setActiveConfig = hwc_setActiveConfig;
+ 
+     /* our private state goes below here */
+     dev->mFbFile = open(HWC_PRIMARY_DISPLAY, O_RDWR);
++    const hw_module_t* grallocModule = NULL;
++    int grallocResult = hw_get_module(GRALLOC_HARDWARE_MODULE_ID,
++                                      &grallocModule);
++    if (grallocResult == 0 && grallocModule != NULL) {
++        dev->mGralloc = reinterpret_cast<const gralloc_module_t*>(
++                grallocModule);
++        grallocResult = framebuffer_open(grallocModule, &dev->mFramebuffer);
++        if (grallocResult == 0)
++            grallocResult = gralloc_open(grallocModule, &dev->mAllocator);
++        if (grallocResult == 0) {
++            /*
++             * HWC 1.0 does not receive HWC_FRAMEBUFFER_TARGET. Allocate a
++             * software RGB565 canvas with the EPDC's real 1888-pixel stride.
++             * fb_post() copies this non-framebuffer handle to fb0 and applies
++             * the shared E Ink update policy.
++             */
++            const int canvasWidth = dev->mFramebuffer->stride;
++            grallocResult = dev->mAllocator->alloc(dev->mAllocator,
++                    canvasWidth, dev->mFramebuffer->height,
++                    HAL_PIXEL_FORMAT_RGB_565,
++                    GRALLOC_USAGE_SW_WRITE_OFTEN |
++                    GRALLOC_USAGE_HW_2D,
++                    &dev->mOutputBuffer, &dev->mOutputStride);
++        }
++    }
++    if (grallocResult != 0) {
++        ALOGE("E70Q10_HWC framebuffer open failed: %d", grallocResult);
++        dev->mGralloc = NULL;
++        dev->mFramebuffer = NULL;
++        dev->mAllocator = NULL;
++        dev->mOutputBuffer = NULL;
++    }
++    dev->mPxp = create_pxp();
+     dev->mVsyncThread = new VSyncThread(dev);
+     if (dev->mFbFile < 0) {
+         dev->mVsyncThread->setFakeVSync(true);
+@@ -266,6 +1589,21 @@ static int hwc_device_open(const struct hw_module_t* module, const char* name,
+ 
+     hwc_get_framebuffer_info(dev);
+     hwc_get_display_type(dev);
++    /*
++     * EPDC does not provide a periodic scanout VSYNC like an LCD.  On the
++     * E70Q10, MXCFB_WAIT_FOR_VSYNC returns immediately, which makes the
++     * urgent-display VSyncThread spin and starve SurfaceFlinger's main loop.
++     * Use the existing timer-backed VSYNC implementation for EPDC instead.
++     */
++    if (dev->mDisplayType == HWC_DISPLAY_EPDC) {
++        /*
++         * An E Ink panel does not benefit from LCD-rate 60 Hz callbacks.
++         * Four callbacks per second keep CPU-Skia buffer reuse observable
++         * without making SurfaceFlinger consume an entire Cortex-A9 core.
++         */
++        dev->mVsyncPeriod = 250000000;
++        dev->mVsyncThread->setFakeVSync(true);
++    }
+ 
+     *device = &dev->device.common;
+     ALOGI("<%s,%d>", __FUNCTION__, __LINE__);
+diff --git a/vendor/nxp-opensource/imx/lights/fsl_lights.c b/vendor/nxp-opensource/imx/lights/fsl_lights.c
+index 168e41d..01b528c 100644
+--- a/vendor/nxp-opensource/imx/lights/fsl_lights.c
++++ b/vendor/nxp-opensource/imx/lights/fsl_lights.c
+@@ -89,7 +89,12 @@ static int set_light_backlight(struct light_device_t* dev,
+     if (brightness > max_brightness) {
+         brightness  = max_brightness;
+     }
+-    if (brightness < 1) {/*target brightness should be at least 1, or backlight will off*/
++    /*
++     * An LCD backlight traditionally stayed at level 1, but the E70Q10 uses
++     * this HAL for a frontlight which must support a true off state.
++     */
++    if (brightness < 1 &&
++            !property_get_bool("ro.ridi.eink_mode", false)) {
+         brightness  = 1;
+     }
+     ALOGV("set_light, max_brightness=%d, target brightness=%d",
