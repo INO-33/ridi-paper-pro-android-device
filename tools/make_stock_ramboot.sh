@@ -11,6 +11,7 @@ kernel="${E70Q10_KERNEL_IMAGE:-$product_out/obj/KERNEL_OBJ/kernel_img}"
 dtb="${E70Q10_DTB_IMAGE:-$product_out/obj/KERNEL_OBJ/imx6sl-e70q10.dtb}"
 ramdisk="$product_out/ramdisk.img"
 mkbootimg="${E70Q10_MKBOOTIMG:-$host_out/bin/mkbootimg}"
+mkbootimg_python="${E70Q10_MKBOOTIMG_PYTHON:-}"
 output="${1:-$product_out/e70q10-$profile-stock-ramboot.img}"
 
 [[ -x "$tool_bin/python" ]] || {
@@ -34,7 +35,12 @@ cat -- "$dtb" >>"$combined_kernel"
 
 cmdline='console=ttymxc0,115200 init=/init androidboot.console=ttymxc0 consoleblank=0 no_console_suspend androidboot.hardware=E70Q10 video=mxcepdcfb:ED078KH1,bpp=16 mem=1018M panic=10 oops=panic loglevel=7 androidboot.selinux=permissive'
 
-"$mkbootimg" \
+mkbootimg_command=("$mkbootimg")
+if [[ -n "$mkbootimg_python" ]]; then
+    mkbootimg_command=("$mkbootimg_python" "$mkbootimg")
+fi
+
+"${mkbootimg_command[@]}" \
     --kernel "$combined_kernel" \
     --ramdisk "$ramdisk" \
     --base 0x82800000 \
@@ -59,4 +65,6 @@ if ((ramdisk_size != $(stat -c %s "$ramdisk") || page_size != 2048)); then
 fi
 
 echo "Created stock-compatible RAM-boot candidate (not flashed): $output"
-sha256sum "$output"
+if [[ "${E70Q10_PRINT_SHA256:-0}" == 1 ]]; then
+    sha256sum "$output"
+fi

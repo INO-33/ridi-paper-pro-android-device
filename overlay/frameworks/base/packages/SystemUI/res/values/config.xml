@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The reader uses ReaderQuickPanelActivity instead of animated phone QS. -->
+    <bool name="enable_volume_ui">false</bool>
+    <bool name="config_showRotationLock">false</bool>
+    <bool name="config_showQuickSettingsEditingIcon">false</bool>
+    <bool name="config_showQuickSettingsExpandIndicator">false</bool>
+    <bool name="config_showQuickSettingsRow">false</bool>
+    <bool name="config_enableQuickSettingsOverscrollExpansion">false</bool>
+    <bool name="config_enableNotificationShadeDrag">false</bool>
+    <bool name="config_showNotificationShelf">false</bool>
+    <bool name="config_enableNonGroupedNotificationExpand">false</bool>
+    <bool name="config_notifications_round_rect_clipping">false</bool>
+
+    <!-- Flat stock 4.4.2 battery artwork renders more cleanly on E Ink. -->
+    <bool name="config_useStockBatteryIcon">true</bool>
+
+    <!-- Notifications are shown by ReaderNotificationPanelActivity, so the
+         swipe-down shade is removed entirely. -->
+    <bool name="config_disableNotificationShade">true</bool>
+
+    <!--
+        The E Ink panel holds the suspend image with no power, but the suspend
+        overlay adds a second full-screen layer and the current HWC path still
+        fails to compose multiple layers (see the HWC investigation notes). Keep
+        it off until that is fixed so it cannot contribute to a SystemUI stall.
+    -->
+    <bool name="config_enableReaderScreensaver">false</bool>
+
+    <!-- Both bars are always solid white: no translucent modes, no cross-fade. -->
+    <bool name="config_fixedColorSystemBars">true</bool>
+
+    <!--
+        Reader navigation bar: back, home, frontlight popup and full refresh.
+        Recents is dropped because the product has no recent-apps UI.
+
+        The value must keep both ';' separators: NavigationBarInflaterView splits
+        it into exactly three start/center/end sections. All four keys go in the
+        centre section, which is a match_parent row without the gravity spacer
+        that the ends section receives, so each key gets an equal quarter of the
+        bar with its icon centred.
+    -->
+    <string name="config_navBarLayout" translatable="false">;back[1WC],home[1WC],ridi_frontlight[1WC],ridi_refresh[1WC];</string>
+</resources>

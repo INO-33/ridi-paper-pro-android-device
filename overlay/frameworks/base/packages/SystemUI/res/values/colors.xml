@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        E Ink reader: the status bar and the navigation bar are drawn on white
+        so their contents have to be black rather than the phone defaults of
+        white-on-black.
+    -->
+    <color name="system_bar_background_opaque">#ffffffff</color>
+    <color name="status_bar_clock_color">#ff000000</color>
+
+    <!-- Icon tints. The panel is monochrome, so use solid black in both modes
+         instead of the translucent phone tints. -->
+    <color name="dark_mode_icon_color_single_tone">#ff000000</color>
+    <color name="light_mode_icon_color_single_tone">#ff000000</color>
+    <color name="dark_mode_icon_color_dual_tone_background">#4d000000</color>
+    <color name="dark_mode_icon_color_dual_tone_fill">#ff000000</color>
+    <color name="light_mode_icon_color_dual_tone_background">#4d000000</color>
+    <color name="light_mode_icon_color_dual_tone_fill">#ff000000</color>
+</resources>

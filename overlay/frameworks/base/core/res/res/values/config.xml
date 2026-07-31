@@ -1,6 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="config_disableLockscreenByDefault">true</bool>
-    <bool name="config_enableWallpaperService">false</bool>
-    <bool name="config_showNavigationBar">false</bool>
+
+    <!--
+        The navigation bar must exist for the reader UI: it carries the RIDI
+        front light and refresh buttons, and config_defaultSystemBarPolicy below
+        only hides an existing bar transiently. Declaring no navigation bar
+        removes it outright and leaves that policy and the SystemUI buttons
+        pointing at a bar that was never created.
+    -->
+    <bool name="config_showNavigationBar">true</bool>
+
+    <!--
+        Hide the navigation bar for every window. PhoneWindowManager then shows
+        it as a transient overlay when the user swipes up from the bottom edge,
+        and SystemUI hides it again after the configured timeout.
+        The status bar is deliberately left alone: it carries the clock and
+        battery, and reader apps already go full screen on their own.
+    -->
+    <string name="config_defaultSystemBarPolicy" translatable="false">immersive.navigation=*</string>
+
+    <!-- This reader has no telephony, no Bluetooth and no screenshot chord. -->
+    <bool name="config_enableScreenshotChord">false</bool>
+    <bool name="config_voice_capable">false</bool>
+    <bool name="config_sms_capable">false</bool>
+    <bool name="config_bluetooth_default_profiles">false</bool>
 </resources>

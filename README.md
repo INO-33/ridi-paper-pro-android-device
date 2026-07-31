@@ -29,6 +29,20 @@ Internal eMMC (`mmcblk0`) is intentionally absent. The minimal init starts the
 hardware watchdog with a 30-second timeout and the kernel command line requests
 an automatic reboot ten seconds after a panic.
 
+The Android build emits sparse `system.img` and `vendor.img` files. Never write
+those sparse containers directly to the SD partitions with `dd`; the kernel
+cannot mount them as ext4. Convert them first:
+
+```sh
+E70Q10_PRODUCT_OUT=/path/to/out/target/product/e70q10 \
+E70Q10_SD_RAW_OUT=/path/on/build-disk/sd-ready \
+device/ridi/e70q10/tools/prepare_sd_raw_images.sh
+```
+
+Only `system.raw.ext4` and `vendor.raw.ext4` are suitable for direct partition
+writes. Their expected expanded sizes are the configured partition sizes:
+768 MiB and 256 MiB, respectively.
+
 ## Reproduce the minimal build
 
 Copy this directory to `device/ridi/e70q10` in NXP
@@ -88,6 +102,11 @@ The reference product uses the positive package allowlist in
 still pulls phone, Bluetooth, NFC, printing, PIM, music and decoration apps
 into an AOSP Oreo image. Launcher2 remains only as a recovery HOME until Total
 Launcher is packaged as a system application.
+
+The device-unique extracted waveform is intentionally not committed. Place it
+at `stock-blobs/imx/epdc/epdc_ED078KH1.fw`; the reference product copies it to
+`/vendor/firmware/imx/epdc/`. Without this file the EPDC driver remains
+uninitialized and `MXCFB_SEND_UPDATE` returns `EPERM`.
 
 Current validation work:
 

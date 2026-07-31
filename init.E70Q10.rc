@@ -26,12 +26,17 @@ on fs
 on post-fs
     write /e70log/ridi-dev/logs/android8-current/stage "post-fs"
     copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-post-fs.txt
+    # The RTL8189FTV is an SDIO device. Load its vendor module before Android's
+    # Wi-Fi services start so WifiNative can discover wlan0.
+    insmod /vendor/lib/modules/8189fs.ko rtw_power_mgnt=0 rtw_enusbss=0
+    setprop wlan.driver.status ok
 
 on post-fs-data
     write /e70log/ridi-dev/logs/android8-current/stage "post-fs-data"
     copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-post-fs-data.txt
     mkdir /data/ridi 0770 system system
     mkdir /data/ridi/logs 0770 system system
+    start e70q10_wifi_prepare
 
 on boot
     write /e70log/ridi-dev/logs/android8-current/stage "boot"
@@ -40,6 +45,10 @@ on boot
     # application View rendering on the CPU-backed Skia Canvas path.
     setprop sys.viewroot.hw false
     setprop debug.egl.hw 0
+    chown system system /sys/class/backlight/lm3630a_led/brightness
+    chmod 0660 /sys/class/backlight/lm3630a_led/brightness
+    chown system system /sys/class/backlight/lm3630a_led/color
+    chmod 0660 /sys/class/backlight/lm3630a_led/color
 
 on property:sys.boot_completed=1
     write /e70log/ridi-dev/logs/android8-current/stage "boot-completed"
@@ -51,6 +60,28 @@ service e70q10_eink_defaults /system/bin/e70q10-eink-settings
     class late_start
     user system
     group system
+    disabled
+    oneshot
+
+# Keep upgraded SD data partitions compatible without replacing saved Wi-Fi
+# configuration. Clean data partitions receive the same setting from the
+# system template when SupplicantManager creates its data file.
+service e70q10_wifi_prepare /system/bin/sh /system/bin/e70q10-wifi-prepare
+    class core
+    user root
+    group root wifi
+    disabled
+    oneshot
+
+# Android's WifiService starts this disabled service through ctl.start after
+# the legacy Wi-Fi HAL has brought up the RTL8189FTV module. This definition is
+# intentionally the same nl80211/HIDL-capable invocation used by NXP's i.MX6SL
+# Oreo reference device.
+service wpa_supplicant /vendor/bin/hw/wpa_supplicant \
+    -iwlan0 -Dnl80211 -c/data/misc/wifi/wpa_supplicant.conf \
+    -e/data/misc/wifi/entropy.bin -g@android:wpa_wlan0
+    socket wpa_wlan0 dgram 660 wifi wifi
+    class main
     disabled
     oneshot
 

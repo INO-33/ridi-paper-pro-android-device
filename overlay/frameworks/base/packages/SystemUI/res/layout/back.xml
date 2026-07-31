@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Reader override: larger icon inside the stock-thickness navigation bar. -->
+<com.android.systemui.statusbar.policy.KeyButtonView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:systemui="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/back"
+    android:layout_width="@dimen/navigation_key_width"
+    android:layout_height="match_parent"
+    android:layout_weight="0"
+    systemui:keyCode="4"
+    android:scaleType="fitCenter"
+    android:contentDescription="@string/accessibility_back"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
+    android:paddingStart="@dimen/navigation_key_padding"
+    android:paddingEnd="@dimen/navigation_key_padding"
+    />

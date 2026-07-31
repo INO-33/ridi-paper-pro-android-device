@@ -46,12 +46,23 @@ TARGET_COPY_OUT_VENDOR := vendor
 
 TARGET_NO_RECOVERY := true
 BOARD_HAVE_BLUETOOTH := false
-BOARD_HAVE_WIFI := false
+BOARD_HAVE_WIFI := true
 BOARD_NOT_HAVE_MODEM := true
 BOARD_HAVE_IMX_CAMERA := false
 USE_CAMERA_STUB := true
 PREBUILT_FSL_IMX_CODEC := false
 PREBUILT_FSL_IMX_OMX := false
+
+# RTL8189FTV (SDIO 024c:f179). The ported driver exposes nl80211/cfg80211.
+# A small legacy vendor HAL supplies the wlan0 handle Android O's HIDL service
+# requires; wificond and wpa_supplicant perform scanning and association.
+BOARD_WLAN_DEVICE := rtl8189fs
+BOARD_WPA_SUPPLICANT_DRIVER := NL80211
+WPA_SUPPLICANT_VERSION := VER_0_8_X
+BOARD_HOSTAPD_DRIVER := NL80211
+WIFI_DRIVER_MODULE_PATH := "/vendor/lib/modules/8189fs.ko"
+WIFI_DRIVER_MODULE_NAME := "8189fs"
+WIFI_DRIVER_MODULE_ARG := "rtw_power_mgnt=0 rtw_enusbss=0"
 
 TARGET_RECOVERY_FSTAB := device/ridi/e70q10/fstab.E70Q10
 TARGET_BOARD_KERNEL_HEADERS := device/fsl/common/kernel-headers

@@ -10,8 +10,8 @@ namespace {
 
 constexpr EGLint kWidth = 1872;
 constexpr EGLint kHeight = 1404;
-constexpr int kWarmupFrames = 3;
-constexpr int kMeasuredFrames = 10;
+constexpr int kWarmupFrames = 1;
+constexpr int kMeasuredFrames = 3;
 
 uint64_t nowNs() {
     timespec ts{};
@@ -88,6 +88,7 @@ void printTiming(const char* name, const uint64_t* samples, int count) {
 }  // namespace
 
 int main() {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (display == EGL_NO_DISPLAY || !eglInitialize(display, nullptr, nullptr))
         fail("eglInitialize");

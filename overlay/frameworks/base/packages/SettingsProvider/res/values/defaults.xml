@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="def_accelerometer_rotation">false</bool>
+    <integer name="def_user_rotation">3</integer>
     <fraction name="def_window_animation_scale">0%</fraction>
     <fraction name="def_window_transition_scale">0%</fraction>
     <bool name="def_lockscreen_disabled">true</bool>
@@ -9,4 +10,8 @@
     <bool name="def_notification_pulse">false</bool>
     <integer name="def_heads_up_enabled">0</integer>
     <bool name="def_bluetooth_on">false</bool>
+    <!-- Hide the navigation bar for every window. PhoneWindowManager then shows
+         it as a transient overlay when the user swipes up from the bottom edge,
+         and SystemUI hides it again after the configured timeout. -->
+    <string name="def_policy_control" translatable="false">immersive.navigation=*</string>
 </resources>

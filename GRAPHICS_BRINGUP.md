@@ -1,16 +1,46 @@
 # E70Q10 graphics bring-up
 
-The i.MX6SoloLite has no 3D GPU. Two isolated graphics paths are kept so an
-experimental Mesa build cannot replace the AGL recovery candidate.
+The i.MX6SoloLite has no 3D GPU. The default is a hybrid path:
 
-## AGL / GLES1 / CPU Skia (default)
+- CPU Skia renders normal Android Views;
+- the HWC uses PxP for rotation and RGB565 conversion;
+- Mesa softpipe supplies the GLES2 ABI only to applications that explicitly
+  create an EGL context.
 
-This is the primary path for YES24 and Total Launcher:
+`ViewRootImpl` disables HWUI when `ro.ridi.eink_mode=true`. This is essential:
+softpipe is compatible with GLES2 but is not fast enough to render ordinary
+YES24 or Total Launcher View hierarchies.
 
-- `libGLES_android` / PixelFlinger for SurfaceFlinger composition
-- forced GLES1 SurfaceFlinger context
-- `sys.viewroot.hw=false` for CPU-backed application Canvas rendering
-- all three Android animation scales set to zero after framework boot
+## PxP HWC
+
+The HWC accepts an opaque 1404x1872 `ROT_270` app layer, stages it in
+PxP-addressable memory and produces an 1872x1404 RGB565 result. The PxP v2
+rotation block leaves four rows blank because 1404 is not divisible by eight;
+the HWC repairs only those rows on the CPU and then posts through the EPDC
+gralloc policy. Any allocation, fence or PxP error falls back to the existing
+software compositor.
+
+Measured on the E70Q10:
+
+- staging pattern: 16.5 ms;
+- PxP rotate plus RGB565 conversion: 24.1 ms;
+- sequential 5.3 MB copy: 26.5 ms;
+- total synthetic pipeline: about 67 ms.
+
+The old full CPU RGB565 rotation measured about 419 ms. Run the non-display
+test with:
+
+```bash
+/system/bin/e70q10_pxp_bench
+```
+
+The NXP `libpxp` is patched to use `mmap64()`. Physical DMA addresses such as
+`0xa5f00000` become negative through Android's 32-bit `off_t` and make the
+original `mmap()` call fail with `EINVAL`.
+
+## AGL / GLES1 recovery path
+
+Select AGL explicitly for recovery comparisons:
 
 Build the current AGL fix:
 
@@ -27,9 +57,10 @@ The PixelFlinger patch rejects scanlines outside the actual color-buffer
 width and height. It addresses the repeatable one-pixel write at the end of
 the second EPDC framebuffer mapping.
 
-## Mesa softpipe (experimental)
+## Mesa softpipe GLES2 compatibility
 
-Select it only for a separate output directory:
+Mesa is now the default EGL backend, but keep its output separate from the
+AGL recovery tree:
 
 ```bash
 E70Q10_GRAPHICS_BACKEND=mesa \
@@ -48,10 +79,8 @@ The Android Mesa backend has an E70Q10 fallback that:
 3. uses CPU-accessible ANativeWindow buffers through gralloc lock/unlock;
 4. copies the softpipe scanline output using the native buffer stride.
 
-This is sufficient to measure an off-screen GLES2 pbuffer and to continue
-window-surface bring-up. Importing arbitrary Android layer buffers into
-softpipe still needs validation before Mesa is considered a complete
-SurfaceFlinger replacement.
+This is sufficient for applications that require a GLES2 context. It is not
+the primary SurfaceFlinger or Android View renderer.
 
 Run the benchmark on a Mesa boot:
 
@@ -64,11 +93,15 @@ It reports separate `glFinish()` times for:
 - full-size 1872x1404 `glClear`;
 - full-size clear plus one nearest-filtered textured quad.
 
-EPDC panel update latency is intentionally excluded. Treat the result as:
+EPDC panel update latency is intentionally excluded. The E70Q10 result was:
 
-- 100-300 ms: worth optimizing;
-- 300-700 ms: usable only for carefully limited static UI;
-- over 1000 ms: do not use softpipe for the complete compositor.
+- full-size clear: 154 ms average;
+- clear plus one textured quad: 4194 ms average.
+
+Consequently, a GLES-heavy application remains impractical. CPU Skia apps
+can still use the fast PxP/EPDC presentation path, while an occasional GLES2
+screen at least has a compatible implementation instead of failing at EGL
+initialization.
 
 ## Building a Mesa RAM-boot image with the known-good kernel
 
@@ -98,6 +131,7 @@ queue-and-merge behavior, but requests use the Linux 4.9
 `mxcfb_update_data` layout. Do not copy the Android 4.4.2 ioctl structure
 binary: the newer structure adds dithering and quantization fields.
 
-The first validation keeps synchronous update completion. This prevents a
-page-flipped buffer from being reused while EPDC/PXP still consumes it.
-Asynchronous coalescing is deferred until the physical panel output is stable.
+The current gralloc queues EPDC updates asynchronously, skips identical
+frames, aligns dirty rectangles and periodically forces a GC16 cleanup. HWC
+waits producer acquire fences before CPU/PxP access and reports synchronous
+release after composition.
