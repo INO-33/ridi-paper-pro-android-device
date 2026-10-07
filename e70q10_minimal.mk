@@ -17,13 +17,13 @@ PRODUCT_AAPT_PREF_CONFIG := xhdpi
 $(call inherit-product, device/ridi/e70q10/e70q10_eink_defaults.mk)
 
 PRODUCT_PACKAGES += \
+    ridi_webview \
     gralloc.imx6 \
     hwcomposer.imx6 \
     libion \
     vndk-sp \
     android.hardware.graphics.mapper@2.0-impl \
-    android.hardware.graphics.allocator@2.0-impl \
-    android.hardware.graphics.allocator@2.0-service
+    android.hardware.graphics.allocator@2.0-impl
 
 PRODUCT_COPY_FILES += \
     device/ridi/e70q10/init.E70Q10.rc:root/init.E70Q10.rc \

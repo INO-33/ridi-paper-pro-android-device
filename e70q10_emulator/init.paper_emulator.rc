@@ -1,0 +1,58 @@
+# The old ARM Ranchu kernel reports the root cpuset as 0-3 even when the
+# emulator exposes only CPU 0.  Copying that mask into child cpusets fails and
+# leaves them empty, so DisplayManagerService crashes when it moves its display
+# and animation threads to top-app.  Keep this emulator-only correction out of
+# the physical E70Q10 ramdisk.
+# /system init fragments may run their `on init` action before the root init
+# action has created the child cpuset directories. post-fs is still before
+# zygote-start, but guarantees that the common cpuset setup is complete.
+# The ARM PAPER strict profiles use qemu.gles=0 and the legacy PixelFlinger
+# software ES1 renderer. The legacy emulator frontend publishes qemu.gles via
+# qemu-props after early-init and may also publish a stale GLES2 advertisement
+# in the same boot-property stream. Handle the selector as a property event so
+# this action runs when the no-GPU mode is actually known, before framework
+# consumers are started. This is emulator-product-only and does not change the
+# physical E70Q10 property path.
+on property:qemu.gles=0
+    setprop ro.opengles.version 65536
+
+on post-fs
+    write /dev/cpuset/foreground/cpus 0
+    write /dev/cpuset/foreground/boost/cpus 0
+    write /dev/cpuset/background/cpus 0
+    write /dev/cpuset/system-background/cpus 0
+    write /dev/cpuset/top-app/cpus 0
+
+    write /dev/cpuset/foreground/mems 0
+    write /dev/cpuset/foreground/boost/mems 0
+    write /dev/cpuset/background/mems 0
+    write /dev/cpuset/system-background/mems 0
+    write /dev/cpuset/top-app/mems 0
+
+# Profile-controlled framework policy. strict_ab leaves the normal Android
+# ViewRoot hardware-acceleration decision untouched; physical_like enables
+# the same production property path used by e70q10_reference. These are
+# emulator-only qemu.* controls and never alter the physical product ramdisk.
+on property:qemu.paper.force_sw_hwui=1
+    setprop sys.viewroot.hw false
+    setprop debug.egl.hw 0
+
+on property:qemu.paper.ridi_eink=1
+    setprop ro.ridi.eink_mode true
+
+# The ARM PAPER emulator exposes Goldfish/Ranchu Ethernet, not a real WLAN
+# device.  Do not keep restarting wificond while the Ethernet path is the
+# intended network transport.  This is scoped to this emulator product and
+# does not change the physical E70Q10 Wi-Fi configuration.
+on post-fs
+    disable wificond
+    stop wificond
+
+# The physical e70q10 AGL path selects the GLES1 RenderEngine and advertises
+# the actual legacy capability (0x00010001). Apply that same display policy to
+# the strict emulator profile without supplying SwiftShader or emulated GLES2.
+# The profile selector is qemu.* because the legacy frontend overwrites direct
+# ro.* command-line properties during early boot.
+on property:qemu.paper.force_gles1=1
+    setprop ro.sf.force_gles1 1
+    setprop ro.opengles.version 65537

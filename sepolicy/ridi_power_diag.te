@@ -1,0 +1,25 @@
+# Optional, device-only suspend recorder. No writes outside its own log dir.
+type ridi_power_diag, domain;
+type ridi_power_diag_exec, exec_type, file_type;
+type ridi_power_diag_data_file, file_type, data_file_type, core_data_file_type;
+type ridi_power_diag_debugfs, fs_type, debugfs_type;
+typeattribute ridi_power_diag coredomain;
+
+init_daemon_domain(ridi_power_diag)
+
+allow ridi_power_diag ridi_power_diag_data_file:dir rw_dir_perms;
+allow ridi_power_diag ridi_power_diag_data_file:file create_file_perms;
+
+allow ridi_power_diag ridi_power_diag_debugfs:file r_file_perms;
+allow ridi_power_diag proc:file r_file_perms;
+allow ridi_power_diag proc_stat:file r_file_perms;
+allow ridi_power_diag sysfs:dir r_dir_perms;
+allow ridi_power_diag sysfs:file r_file_perms;
+allow ridi_power_diag sysfs_batteryinfo:dir r_dir_perms;
+allow ridi_power_diag sysfs_batteryinfo:file r_file_perms;
+
+# BatteryStats -c runs only at session start and after an explicit sample/stop.
+allow ridi_power_diag system_file:file execute_no_trans;
+binder_use(ridi_power_diag)
+binder_call(ridi_power_diag, system_server)
+allow ridi_power_diag batterystats_service:service_manager find;

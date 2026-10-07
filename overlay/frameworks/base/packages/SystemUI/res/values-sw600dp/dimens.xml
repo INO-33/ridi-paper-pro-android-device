@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        smallestScreenWidthDp is 748 on this panel, so res/values-sw600dp wins
+        over res/values and these have to be repeated here.
+
+        The four keys are weighted, so navigation_key_width is only the minimum
+        width of each key. The horizontal padding must stay small or the stock
+        25dp inset shrinks the icons back down.
+    -->
+    <dimen name="navigation_key_width">104dp</dimen>
+    <dimen name="navigation_extra_key_width">52dp</dimen>
+    <dimen name="navigation_key_padding">0dp</dimen>
+</resources>

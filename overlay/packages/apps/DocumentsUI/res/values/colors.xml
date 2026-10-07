@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- RIDI reader: match Settings' simple, high-contrast monochrome palette. -->
+    <color name="window_background">#ffffffff</color>
+    <color name="drawer_background">#ffffffff</color>
+    <color name="drawer_border">#ffbdbdbd</color>
+    <color name="directory_background">#ffffffff</color>
+
+    <color name="primary_dark">#ffe0e0e0</color>
+    <color name="primary">#fff5f5f5</color>
+    <color name="accent">#ff111111</color>
+    <color name="accent_dark">#ff111111</color>
+
+    <color name="text_cursor">#ff111111</color>
+    <color name="text_handle">#ff424242</color>
+    <color name="text_highlight">#66333333</color>
+
+    <color name="band_select_background">#33757575</color>
+    <color name="band_select_border">#ff424242</color>
+
+    <color name="root_title_color">#ff111111</color>
+    <color name="root_activated_color">#ff000000</color>
+    <color name="root_details_color">#ff616161</color>
+    <color name="root_focus_color">#ffe0e0e0</color>
+    <color name="item_hover_color">#ffe0e0e0</color>
+    <color name="sort_widget_text_color">#ff111111</color>
+
+    <color name="root_icon_color">#ff424242</color>
+    <color name="doc_icon_color">#ff424242</color>
+    <color name="item_doc_title">#ff111111</color>
+    <color name="item_doc_details">#ff616161</color>
+    <color name="item_doc_background">#ffffffff</color>
+    <color name="item_doc_background_disabled">#fff5f5f5</color>
+    <color name="item_doc_background_selected">#ffd6d6d6</color>
+    <color name="item_doc_droppable_background">#ffe0e0e0</color>
+    <color name="item_doc_not_droppable_background">#fff5f5f5</color>
+    <color name="item_grid_tint">#ff212121</color>
+
+    <color name="downloads_icon_background">#ff616161</color>
+    <color name="app_icon_background">#ffffffff</color>
+    <color name="shortcut_foreground">#ff212121</color>
+    <color name="shortcut_background">#fff5f5f5</color>
+
+    <color name="scroll_thumb_pressed">#ff424242</color>
+    <color name="scroll_thumb">#ff757575</color>
+    <color name="scroll_track">#ffeeeeee</color>
+</resources>

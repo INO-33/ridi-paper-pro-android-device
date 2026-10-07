@@ -26,6 +26,19 @@ on fs
 on post-fs
     write /e70log/ridi-dev/logs/android8-current/stage "post-fs"
     copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-post-fs.txt
+
+    # zram swap. This runs after "on fs" mount_all because fs_mgr shells out to
+    # /system/bin/mkswap, which is a toybox symlink on the mounted system image.
+    #
+    # comp_algorithm can only be changed while disksize is still 0, and fs_mgr
+    # sets disksize inside swapon_all, so the algorithm must be selected first.
+    # lz4 decompresses far faster than lzo, which matters when the single core
+    # has to service every page fault. CONFIG_CRYPTO_LZ4 is not in the currently
+    # flashed kernel, so this write fails harmlessly today (init logs it and
+    # continues, zram stays on lzo) and starts taking effect after the next
+    # kernel build picks up the defconfig change.
+    write /sys/block/zram0/comp_algorithm lz4
+    swapon_all /fstab.E70Q10
     # The RTL8189FTV is an SDIO device. Load its vendor module before Android's
     # Wi-Fi services start so WifiNative can discover wlan0.
     insmod /vendor/lib/modules/8189fs.ko rtw_power_mgnt=0 rtw_enusbss=0
@@ -36,6 +49,8 @@ on post-fs-data
     copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-post-fs-data.txt
     mkdir /data/ridi 0770 system system
     mkdir /data/ridi/logs 0770 system system
+    mkdir /data/ridi/logs/power-diag 0700 root root
+    restorecon_recursive /data/ridi/logs/power-diag
     start e70q10_wifi_prepare
 
 on boot
@@ -49,12 +64,67 @@ on boot
     chmod 0660 /sys/class/backlight/lm3630a_led/brightness
     chown system system /sys/class/backlight/lm3630a_led/color
     chmod 0660 /sys/class/backlight/lm3630a_led/color
+    # BatteryService -> lights HAL owns the external RGB LED after boot.
+    chown system system /sys/class/leds/ridi:red/brightness
+    chmod 0660 /sys/class/leds/ridi:red/brightness
+    chown system system /sys/class/leds/ridi:green/brightness
+    chmod 0660 /sys/class/leds/ridi:green/brightness
+    chown system system /sys/class/leds/ridi:blue/brightness
+    chmod 0660 /sys/class/leds/ridi:blue/brightness
+
+    # i.MX6SL is a single Cortex-A9 with only three OPPs (396/792/996 MHz), so
+    # perceived speed depends entirely on how fast that one core is raised.
+    #
+    # The kernel default is ondemand, which on this SoC resolves to a 61 ms
+    # sampling period (LATENCY_MULTIPLIER 1000 x the 61 us clock-latency from
+    # imx6sl.dtsi) and an up_threshold of 95 with no down hysteresis. A UI burst
+    # that loads the core to 80-90% for a few tens of ms therefore never raises
+    # the clock, and when it does it drops straight back to 396 MHz.
+    #
+    # interactive is already built in (CONFIG_CPU_FREQ_GOV_INTERACTIVE=y). It
+    # re-evaluates every 20 ms and holds a raised clock for min_sample_time,
+    # which suits the bursty single-core workload here.
+    #
+    # imx6q-cpufreq does not set CPUFREQ_HAVE_GOVERNOR_PER_POLICY, so the
+    # tunables live under the global cpufreq kobject rather than the policy dir.
+    # They only exist once the governor is selected, hence the ordering below.
+    write /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor interactive
+
+    # go_hispeed_load 99 -> 85 and target_loads 90 -> 80 so the core reaches
+    # 996 MHz during a page turn instead of riding the bottom OPP.
+    write /sys/devices/system/cpu/cpufreq/interactive/hispeed_freq 996000
+    write /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load 85
+    write /sys/devices/system/cpu/cpufreq/interactive/target_loads 80
+    # Times are microseconds. Defaults kept: 20 ms evaluation and above-hispeed
+    # delay, 80 ms hold after a raise.
+    write /sys/devices/system/cpu/cpufreq/interactive/timer_rate 20000
+    write /sys/devices/system/cpu/cpufreq/interactive/above_hispeed_delay 20000
+    write /sys/devices/system/cpu/cpufreq/interactive/min_sample_time 80000
+    # Reading pages back from the SD card is a large part of app launch on this
+    # device, so iowait must count as busy or the governor idles through it.
+    write /sys/devices/system/cpu/cpufreq/interactive/io_is_busy 1
 
 on property:sys.boot_completed=1
     write /e70log/ridi-dev/logs/android8-current/stage "boot-completed"
     copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-boot-completed.txt
     write /dev/kmsg "E70Q10_ANDROID_BOOT_COMPLETED"
     start e70q10_eink_defaults
+
+# Optional suspend/battery recorder. Enable with
+# setprop sys.ridi.power_diag 1; stop with ... 0.
+# It has no wake lock and does not request RTC wakeups.
+on property:sys.ridi.power_diag=1
+    start e70q10_power_diag
+
+on property:sys.ridi.power_diag=0
+    stop e70q10_power_diag
+
+service e70q10_power_diag /system/bin/e70q10_power_diag
+    class late_start
+    user root
+    group system
+    disabled
+    oneshot
 
 service e70q10_eink_defaults /system/bin/e70q10-eink-settings
     class late_start

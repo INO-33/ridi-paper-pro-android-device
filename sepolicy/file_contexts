@@ -1,0 +1,2 @@
+/system/bin/e70q10_power_diag             u:object_r:ridi_power_diag_exec:s0
+/data/ridi/logs/power-diag(/.*)?           u:object_r:ridi_power_diag_data_file:s0

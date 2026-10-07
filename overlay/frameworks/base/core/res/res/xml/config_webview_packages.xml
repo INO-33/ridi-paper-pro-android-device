@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<webviewproviders>
+    <!-- The AOSP x86 image installs com.android.webview, not Google WebView or Chrome. -->
+    <webviewprovider
+        description="Android WebView"
+        packageName="com.android.webview"
+        availableByDefault="true" />
+</webviewproviders>

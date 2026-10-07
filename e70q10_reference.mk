@@ -26,6 +26,9 @@ else
 PRODUCT_PACKAGES += libGLES_android
 endif
 
+# Removable, disabled-by-default suspend/battery diagnostic recorder.
+PRODUCT_PACKAGES += e70q10_power_diag
+
 PRODUCT_PACKAGES += \
     e70q10_pxp_bench \
     libpxp \
@@ -40,7 +43,6 @@ PRODUCT_PACKAGES += \
     android.hardware.keymaster@3.0-service \
     android.hardware.graphics.mapper@2.0-impl \
     android.hardware.graphics.allocator@2.0-impl \
-    android.hardware.graphics.allocator@2.0-service \
     lights.imx6 \
     android.hardware.light@2.0-impl \
     android.hardware.light@2.0-service \
@@ -50,6 +52,7 @@ PRODUCT_PACKAGES += \
     wpa_supplicant_overlay.conf
 
 PRODUCT_COPY_FILES += \
+    device/ridi/e70q10/assets/bootanimation-stock-1404x1872.zip:system/media/bootanimation.zip \
     device/ridi/e70q10/init.E70Q10.rc:root/init.E70Q10.rc \
     device/fsl/imx6/etc/init.usb.rc:root/init.freescale.usb.rc \
     device/ridi/e70q10/fstab.E70Q10:root/fstab.E70Q10 \
@@ -64,6 +67,7 @@ PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.touchscreen.xml:system/etc/permissions/android.hardware.touchscreen.xml \
     frameworks/native/data/etc/android.hardware.touchscreen.multitouch.xml:system/etc/permissions/android.hardware.touchscreen.multitouch.xml \
     frameworks/native/data/etc/android.hardware.screen.portrait.xml:system/etc/permissions/android.hardware.screen.portrait.xml \
+    frameworks/native/data/etc/android.hardware.usb.accessory.xml:system/etc/permissions/android.hardware.usb.accessory.xml \
     frameworks/native/data/etc/android.hardware.wifi.xml:system/etc/permissions/android.hardware.wifi.xml
 
 E70Q10_EPDC_WAVEFORM := device/ridi/e70q10/stock-blobs/imx/epdc/epdc_ED078KH1.fw
@@ -82,7 +86,7 @@ PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
     ro.debuggable=1 \
     sys.viewroot.hw=false \
     persist.enable_task_snapshots=false \
-    persist.sys.usb.config=adb
+    persist.sys.usb.config=mtp,adb
 
 ifeq ($(E70Q10_GRAPHICS_BACKEND),mesa)
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.hardware.egl=mesa
@@ -92,12 +96,14 @@ endif
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.ridi.eink_mode=true \
+    ro.ridi.usb_mtp_default=true \
     ro.hardware.app=freescale \
     ro.radio.noril=yes \
     hw.backlight.dev=lm3630a_led \
     wifi.interface=wlan0 \
     ro.sf.lcd_density=300 \
-    debug.sf.nobootanimation=1
+    ro.ridi.epd.vsync_hz=15 \
+    dalvik.vm.dex2oat-filter=quicken
 
 ifeq ($(E70Q10_GRAPHICS_BACKEND),mesa)
 PRODUCT_PROPERTY_OVERRIDES += ro.opengles.version=131072

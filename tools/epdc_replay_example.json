@@ -1,0 +1,23 @@
+{
+  "panel_initial": 255,
+  "events": [
+    {
+      "name": "draw right-edge black line",
+      "draw": [
+        {"rect": [1403, 100, 1, 800], "gray": 0}
+      ],
+      "update_rects": [
+        [1400, 96, 4, 808]
+      ]
+    },
+    {
+      "name": "erase right-edge line",
+      "draw": [
+        {"rect": [1403, 100, 1, 800], "gray": 255}
+      ],
+      "update_rects": [
+        [1400, 96, 4, 808]
+      ]
+    }
+  ]
+}

@@ -3,3 +3,13 @@
 /dev/block/mmcblk1p2  /system  ext4  ro,barrier=1                         wait
 /dev/block/mmcblk1p3  /vendor  ext4  ro,barrier=1                         wait
 /dev/block/mmcblk1p4  /data    ext4  noatime,nosuid,nodev,errors=panic    wait,check
+
+# zram swap. The board has 1 GB of DDR and no GMS, and CONFIG_SWAP/CONFIG_ZRAM/
+# CONFIG_ZSMALLOC are already enabled in e70q10_defconfig, so no kernel change
+# is needed. Compressing cold anonymous pages is much cheaper than letting lmkd
+# kill the app the reader was just in and paying a full cold start again.
+#
+# 25% is deliberately conservative: this is a single Cortex-A9, so every swap-in
+# costs decompression time on the only core. fs_mgr resolves the percentage
+# against _SC_PHYS_PAGES and writes it to /sys/block/zram0/disksize.
+/dev/block/zram0      none     swap  defaults                             zramsize=25%,max_comp_streams=1

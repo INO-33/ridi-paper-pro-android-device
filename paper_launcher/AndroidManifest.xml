@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.ridi.paperlauncher"
+    android:versionCode="27"
+    android:versionName="8.0.0-ridi.2">
+    <application android:label="PAPER Home"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:hardwareAccelerated="false">
+        <activity android:name=".PaperHomeActivity" android:screenOrientation="portrait"
+            android:launchMode="singleTask" android:stateNotNeeded="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

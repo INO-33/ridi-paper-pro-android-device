@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="config_disableLockscreenByDefault">true</bool>
+    <bool name="config_ridiStockShutdownConfirmation">true</bool>
+    <!-- Avoid dimming the full E Ink screen behind default dialogs. -->
+    <bool name="config_ridiEinkDialogStyle">true</bool>
+
+    <!-- Preserve the saved frontlight level on wake, including 0 (off).
+         The generic display-power floor otherwise raises a saved 0 to 10/1. -->
+    <integer name="config_screenBrightnessSettingMinimum">0</integer>
+    <integer name="config_screenBrightnessDark">0</integer>
 
     <!--
         The navigation bar must exist for the reader UI: it carries the RIDI
@@ -25,4 +33,9 @@
     <bool name="config_voice_capable">false</bool>
     <bool name="config_sms_capable">false</bool>
     <bool name="config_bluetooth_default_profiles">false</bool>
+
+    <!-- PAPER exposes power off only. SystemUI appends the explicit cancel row. -->
+    <string-array translatable="false" name="config_globalActionsList">
+        <item>power</item>
+    </string-array>
 </resources>

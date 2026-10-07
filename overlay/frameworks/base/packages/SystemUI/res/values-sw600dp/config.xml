@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        This panel is 1404x1872 at 300dpi, so smallestScreenWidthDp is 748 and
+        Android prefers res/values-sw600dp over res/values. The reader layout has
+        to be repeated here or the stock "left;back,home,recent;right" wins and
+        the four-key bar never appears.
+
+        Keep both ';' separators: NavigationBarInflaterView splits the value into
+        exactly three start/center/end sections. All four keys go in the centre
+        section, which is a match_parent row without the gravity spacer that the
+        ends section receives, so each key gets an equal quarter of the bar.
+    -->
+    <string name="config_navBarLayout" translatable="false">;back[1WC],home[1WC],ridi_frontlight[1WC],ridi_refresh[1WC];</string>
+</resources>

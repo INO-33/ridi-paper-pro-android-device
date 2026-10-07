@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Keep portrait dialogs close to the stock confirmation width. -->
+    <item type="dimen" name="dialog_min_width_minor">65%</item>
     <!-- Compact, permanently visible E Ink navigation strip. -->
     <dimen name="navigation_bar_height">32dp</dimen>
     <dimen name="navigation_bar_height_landscape">32dp</dimen>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ZIP creation/extraction is framework-backed and intentionally remains enabled. -->
+    <bool name="feature_archive_creation">true</bool>
+
+    <!-- Remove features that add gesture/remote-provider paths on the local reader. -->
+    <bool name="feature_gesture_scale">false</bool>
+    <bool name="feature_remote_actions">false</bool>
+    <bool name="feature_virtual_files_sharing">false</bool>
+</resources>

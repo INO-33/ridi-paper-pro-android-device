@@ -1,0 +1,7 @@
+# Only these two existing kernel statistic files are readable by the recorder.
+genfscon debugfs /wakeup_sources u:object_r:ridi_power_diag_debugfs:s0
+genfscon debugfs /suspend_stats u:object_r:ridi_power_diag_debugfs:s0
+
+# The GPIO LED node and its class links are used only by the lights HAL.
+genfscon sysfs /devices/platform/ridi-status-leds u:object_r:sysfs_leds:s0
+genfscon sysfs /class/leds u:object_r:sysfs_leds:s0

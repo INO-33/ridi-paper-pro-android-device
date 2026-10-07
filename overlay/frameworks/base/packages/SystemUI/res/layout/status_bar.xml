@@ -73,6 +73,7 @@
         <com.android.keyguard.AlphaOptimizedLinearLayout android:id="@+id/system_icon_area"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
+            android:paddingTop="@dimen/status_bar_reader_top_inset"
             android:baselineAligned="false"
             android:gravity="center_vertical"
             android:orientation="horizontal"
@@ -92,10 +93,12 @@
                 android:layout_height="match_parent"
                 android:singleLine="true"
                 android:includeFontPadding="false"
+                android:textColor="@color/status_bar_clock_color"
                 android:paddingStart="@dimen/status_bar_clock_starting_padding"
                 android:paddingEnd="@dimen/status_bar_clock_end_padding"
                 android:gravity="center_vertical|start"
                 systemui:amPmStyle="normal"
+                systemui:showDark="false"
                 />
         </com.android.keyguard.AlphaOptimizedLinearLayout>
     </LinearLayout>

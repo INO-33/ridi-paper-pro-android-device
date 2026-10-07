@@ -7,12 +7,25 @@ product_out="${E70Q10_PRODUCT_OUT:-$out_dir/target/product/e70q10}"
 host_out="${ANDROID_HOST_OUT:-$out_dir/host/linux-x86}"
 tool_bin="${RIDI_ANDROID8_TOOL_BIN:-$workspace/host-tools/android8-bin}"
 profile="${E70Q10_RAMBOOT_PROFILE:-minimal}"
+storage="${E70Q10_RAMBOOT_STORAGE:-emmc}"
 kernel="${E70Q10_KERNEL_IMAGE:-$product_out/obj/KERNEL_OBJ/kernel_img}"
 dtb="${E70Q10_DTB_IMAGE:-$product_out/obj/KERNEL_OBJ/imx6sl-e70q10.dtb}"
-ramdisk="$product_out/ramdisk.img"
+ramdisk="${E70Q10_RAMDISK_IMAGE:-$product_out/ramdisk.img}"
 mkbootimg="${E70Q10_MKBOOTIMG:-$host_out/bin/mkbootimg}"
 mkbootimg_python="${E70Q10_MKBOOTIMG_PYTHON:-}"
-output="${1:-$product_out/e70q10-$profile-stock-ramboot.img}"
+output="${1:-$product_out/e70q10-$profile-$storage-stock-ramboot.img}"
+emmc_tools="$workspace/porting/e70q10/emmc-updater"
+
+case "$storage" in
+    emmc)
+        [[ -r "$emmc_tools/boot_image.py" ]] || {
+            echo "Missing eMMC ramdisk converter: $emmc_tools/boot_image.py" >&2
+            exit 1
+        }
+        ;;
+    sd) ;;
+    *) echo "Unsupported E70Q10_RAMBOOT_STORAGE: $storage (use emmc or sd)" >&2; exit 1 ;;
+esac
 
 [[ -x "$tool_bin/python" ]] || {
     echo "Missing Python 2 wrapper: $tool_bin/python" >&2
@@ -30,6 +43,7 @@ done
 temp_dir="$(mktemp -d)"
 trap 'rm -r -- "$temp_dir"' EXIT
 combined_kernel="$temp_dir/zImage+imx6sl-e70q10.dtb"
+candidate="$temp_dir/boot.img"
 cp -- "$kernel" "$combined_kernel"
 cat -- "$dtb" >>"$combined_kernel"
 
@@ -46,10 +60,10 @@ fi
     --base 0x82800000 \
     --pagesize 2048 \
     --cmdline "$cmdline" \
-    --output "$output"
+    --output "$candidate"
 
 read -r kernel_size _ ramdisk_size _ second_size _ _ page_size \
-    < <(od -An -v -w32 -j8 -N32 -tu4 "$output")
+    < <(od -An -v -w32 -j8 -N32 -tu4 "$candidate")
 
 if ((second_size != 0)); then
     echo "Refusing unexpected image with second_size=$second_size" >&2
@@ -64,7 +78,25 @@ if ((ramdisk_size != $(stat -c %s "$ramdisk") || page_size != 2048)); then
     exit 1
 fi
 
-echo "Created stock-compatible RAM-boot candidate (not flashed): $output"
+if [[ "$storage" == emmc ]]; then
+    # Reuse the updater's partition mapping and metadata-preserving newc writer.
+    # This changes only the temporary ramdisk; BSP/build inputs stay untouched.
+    # /system=p5, /vendor=p8, /data=p7, /cache=p6 on internal mmcblk0.
+    # The SD log mount becomes tmpfs, so early-init needs no SD card.
+    PYTHONDONTWRITEBYTECODE=1 python3 - "$emmc_tools" "$candidate" <<'PY'
+import pathlib
+import sys
+sys.path.insert(0, sys.argv[1])
+from boot_image import prepare
+image = pathlib.Path(sys.argv[2])
+converted, release = prepare(image.read_bytes())
+image.write_bytes(converted)
+print('Validated eMMC ramdisk; kernel:', release)
+PY
+fi
+
+cp -- "$candidate" "$output"
+echo "Created stock-compatible $storage RAM-boot candidate (not flashed): $output"
 if [[ "${E70Q10_PRINT_SHA256:-0}" == 1 ]]; then
     sha256sum "$output"
 fi

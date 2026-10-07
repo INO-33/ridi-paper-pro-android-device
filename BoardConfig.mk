@@ -20,6 +20,12 @@ TARGET_USES_HWC2 := false
 TARGET_HWCOMPOSER_VERSION := v1.0
 TARGET_HAVE_VIV_HWCOMPOSER := false
 PREBUILT_FSL_IMX_GPU := false
+NUM_FRAMEBUFFER_SURFACE_BUFFERS := 3
+TARGET_USE_PAN_DISPLAY := true
+# Keep the legacy gralloc0 allocator in SurfaceFlinger. Its HW_FB page
+# allocator and passthrough mapper must share one module instance so
+# registerBuffer()/unregisterBuffer() describe the real BufferQueue lifetime.
+SF_START_GRAPHICS_ALLOCATOR_SERVICE := true
 ifeq ($(E70Q10_GRAPHICS_BACKEND),mesa)
 BOARD_GPU_DRIVERS := swrast
 endif
@@ -68,7 +74,32 @@ TARGET_RECOVERY_FSTAB := device/ridi/e70q10/fstab.E70Q10
 TARGET_BOARD_KERNEL_HEADERS := device/fsl/common/kernel-headers
 
 BOARD_SEPOLICY_DIRS := \
-    device/fsl/imx6/sepolicy
+    device/fsl/imx6/sepolicy \
+    device/ridi/e70q10/sepolicy
 
 # These images are not flashable to the stock 6 MiB boot / 384 MiB system
 # partitions. They are inputs for fastboot RAM boot and external-SD bring-up.
+
+# Applications are deliberately not dexpreopted at build time.
+#
+# build/make/core/dex_preopt.mk defaults WITH_DEXPREOPT_BOOT_IMG_ONLY to true on
+# eng builds, which is what this device wants. Clearing it does not buy anything:
+# the device runs dex2oat once, during the first boot after the image is
+# written, and caches the result in /data/dalvik-cache. Later boots reuse that
+# cache, so applications are not interpreted "on every boot". PackageManager
+# gives SystemUI and the two HOME packages a product-specific quicken pass
+# before SystemUI starts; other applications retain the normal eng policy.
+#
+# It also cannot be built here. Application dexpreopt makes the host dex2oat
+# load the target boot image at the fixed base address it was built for
+# (0x7036b000), dexpreopt passes -Xnorelocate so it may not move it, and a
+# current kernel ignores the address hint:
+#
+#   Failed to mmap at expected address, mapped at 0x7ffff4c00000
+#       instead of 0x7036b000
+#   Dex file fallback disabled, cannot continue without image
+#
+# Every application then fails to compile and no system image can be built.
+# setarch -R does not help; it would need "sudo sysctl -w vm.mmap_rnd_bits=28"
+# on the build host. Not worth a host-wide change to ASLR entropy for work the
+# device already does once by itself.

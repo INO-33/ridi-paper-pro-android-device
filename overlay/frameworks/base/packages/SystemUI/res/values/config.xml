@@ -20,12 +20,20 @@
     <bool name="config_disableNotificationShade">true</bool>
 
     <!--
-        The E Ink panel holds the suspend image with no power, but the suspend
-        overlay adds a second full-screen layer and the current HWC path still
-        fails to compose multiple layers (see the HWC investigation notes). Keep
-        it off until that is fixed so it cannot contribute to a SystemUI stall.
+        The E Ink panel holds the suspend image with no power. This was off while
+        the HWC could not compose multiple layers, which is the condition that
+        made a second full-screen overlay risky. That path is fixed: ignorable
+        reader layers are now classified before the composition type, and
+        composition is scoped to the frame's damage.
+
+        The remaining open question is timing, not composition. The frame is
+        added on a callback from SystemUI while system_server continues to power
+        the display down in the same pass, and config_animateScreenLights is
+        false so there is no fade to draw during. If the frame does not make it,
+        the panel simply keeps the previous one, which is the same result as the
+        "keep last screen" style.
     -->
-    <bool name="config_enableReaderScreensaver">false</bool>
+    <bool name="config_enableReaderScreensaver">true</bool>
 
     <!-- Both bars are always solid white: no translucent modes, no cross-fade. -->
     <bool name="config_fixedColorSystemBars">true</bool>
