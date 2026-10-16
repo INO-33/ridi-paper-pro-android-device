@@ -47,3 +47,8 @@ waveform은 EPDC 초기화에 필요하고, `prebuilt/8189fs.ko`는 선택한 �
 
 현재 체크포인트는 2026-10-16입니다. 최종 저전압 종료 화면 등 실기기에서
 계속 확인할 항목이 있으며, 소스 업로드가 모든 기능 검증 완료를 의미하지는 않습니다.
+
+## 개발환경과 공개 전 자산 검토
+
+처음 구성하는 개발자는 메인 저장소의 [개발환경 구축 안내](https://github.com/INO-33/ridi-paper-pro/blob/checkpoint-20261016/DEVELOPMENT.md)를 따릅니다.
+공개 전 제외·확인 대상은 [공개 자산 목록](https://github.com/INO-33/ridi-paper-pro/blob/checkpoint-20261016/PUBLIC_ASSETS.md)에 있습니다.
