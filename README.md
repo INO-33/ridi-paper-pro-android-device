@@ -3,7 +3,7 @@
 Android 8용 RIDI PAPER PRO(E70Q10) 제품 정의입니다. 보드 설정, init/fstab,
 리소스 오버레이, RIDI 앱과 빌드에 필요한 기기 자산을 보관합니다.
 
-**전체 소스 준비:** [메인 manifest 저장소](https://github.com/INO-33/RIDI_ANDROID8_MANIFEST)
+**전체 소스 준비:** [메인 manifest 저장소](https://github.com/INO-33/ridi-paper-pro)
 
 ## 포함 내용
 
@@ -32,13 +32,13 @@ Android 8용 RIDI PAPER PRO(E70Q10) 제품 정의입니다. 보드 설정, init/
 
 프레임워크/gralloc 확장이 있는 변경은 같은 빌드의 system/vendor를 함께
 준비합니다. 커널 변경은 boot/vendor 모듈 호환성도 확인합니다. 업데이터와 GUI
-사용법은 [SD 도구 저장소](https://github.com/INO-33/RIDI_PAPER_PRO_SD_TOOLS)에 있습니다.
+사용법은 [SD 도구 저장소](https://github.com/INO-33/ridi-paper-pro-sd-tools)에 있습니다.
 
 ## 기기 자산과 이력
 
 waveform은 EPDC 초기화에 필요하고, `prebuilt/8189fs.ko`는 선택한 커널과
 호환되어야 합니다. 비공개 기기 자산을 포함하므로 이 저장소를 공개로 바꾸지
-않습니다. WebView 소스는 [Chromium 저장소](https://github.com/INO-33/RIDI_CHROMIUM_M58)에
+않습니다. WebView 소스는 [Chromium 저장소](https://github.com/INO-33/ridi-paper-pro-webview)에
 별도로 있으며, 제품에 포함된 APK의 해시는 메인 lock 파일에서 확인할 수 있습니다.
 
 이번 README 교체 전의 상세 포팅 기록은
