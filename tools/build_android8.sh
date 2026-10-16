@@ -60,6 +60,18 @@ case "${1:-check}" in
             exit 1
         fi
         (($#)) || set -- ramdisk
+        # HWC/gralloc are on the separate vendor partition; keep the sleep
+        # extension producer and the framework consumer in the same build.
+        want_system=0
+        want_vendor=0
+        for build_target in "$@"; do
+            [[ "$build_target" != systemimage ]] || want_system=1
+            [[ "$build_target" != vendorimage ]] || want_vendor=1
+        done
+        if (( want_system && !want_vendor )); then
+            set -- "$@" vendorimage
+            echo "Adding vendorimage: apply system.img and vendor.img together"
+        fi
         echo "Building $* with -j$jobs into $OUT_DIR"
         make -j"$jobs" "$@"
         ;;

@@ -1,131 +1,49 @@
-# E70Q10 Android product status
+# RIDI PAPER PRO · 기기 설정과 시스템 구성
 
-This tree defines a dedicated NXP i.MX6SL product and selects the reconstructed
-E70Q10 DTB. Android 8 reaches `sys.boot_completed=1` using RAM boot and the
-external-SD system/vendor/data partitions. It remains a recovery-oriented
-bring-up tree, not an eMMC-flashing procedure.
+Android 8용 RIDI PAPER PRO(E70Q10) 제품 정의입니다. 보드 설정, init/fstab,
+리소스 오버레이, RIDI 앱과 빌드에 필요한 기기 자산을 보관합니다.
 
-For the first SD/RAM boot, use `e70q10_minimal-eng`. It starts from Android's
-`core_minimal` product instead of the full NXP EVK product and includes only
-the framework, ADB, i.MX6 graphics, touch input files and the graphics HIDL
-interfaces. Wi-Fi, Bluetooth, camera, audio, OMX, GMS and consumer apps remain
-disabled until the base userspace reaches `sys.boot_completed`.
+**전체 소스 준비:** [메인 manifest 저장소](https://github.com/INO-33/RIDI_ANDROID8_MANIFEST)
 
-See [`FEATURE_PRUNING_PLAN.md`](FEATURE_PRUNING_PLAN.md) for the hardware-based
-package policy and the planned minimal, reader and production product profiles.
-The updated execution order and YES24/Total Launcher target are documented in
-[`FINAL_PORTING_PLAN.md`](FINAL_PORTING_PLAN.md). The verified NXP graphics
-call path is documented in [`GRAPHICS_EPDC_PATH.md`](GRAPHICS_EPDC_PATH.md).
-The first complete reference image hashes and sizes are recorded in
-[`BUILD_RESULTS.md`](BUILD_RESULTS.md).
+## 포함 내용
 
-The minimal fstab refers only to external SD partitions:
+- `AndroidProducts.mk`, `BoardConfig.mk`, `e70q10*.mk`: 제품·보드·패키지 구성
+- `init.E70Q10.rc`, `fstab.E70Q10`, `sepolicy/`: 부팅·파티션·권한 설정
+- `overlay/`: Settings, SystemUI 등 기기별 화면과 기본값
+- `paper_launcher/`, `sleep/`: RIDI 런처와 절전 화면 자산
+- `webview/`: Android 제품에 넣는 고정 WebView APK
+- `stock-blobs/`, `prebuilt/`: waveform 및 Wi-Fi 모듈 등 필수 입력
+- `tools/`: Android 빌드, RAM 부팅 이미지 및 에뮬레이터 보조 도구
 
-- `mmcblk1p2`: read-only `/system`
-- `mmcblk1p3`: read-only `/vendor`
-- `mmcblk1p4`: writable `/data`
+## 제품과 빌드
 
-Internal eMMC (`mmcblk0`) is intentionally absent. The minimal init starts the
-hardware watchdog with a 30-second timeout and the kernel command line requests
-an automatic reboot ten seconds after a panic.
-
-The Android build emits sparse `system.img` and `vendor.img` files. Never write
-those sparse containers directly to the SD partitions with `dd`; the kernel
-cannot mount them as ext4. Convert them first:
+자동 배치 경로는 `device/ridi/e70q10`입니다. 메인 저장소의 준비 스크립트와
+환경 설정을 사용한 뒤 기준 제품을 빌드합니다.
 
 ```sh
-E70Q10_PRODUCT_OUT=/path/to/out/target/product/e70q10 \
-E70Q10_SD_RAW_OUT=/path/on/build-disk/sd-ready \
-device/ridi/e70q10/tools/prepare_sd_raw_images.sh
+"$ANDROID_BUILD_TOP/ridi-build-support/build.sh" check e70q10_reference-eng
+"$ANDROID_BUILD_TOP/ridi-build-support/build.sh" build e70q10_reference-eng bootimage systemimage vendorimage
 ```
 
-Only `system.raw.ext4` and `vendor.raw.ext4` are suitable for direct partition
-writes. Their expected expanded sizes are the configured partition sizes:
-768 MiB and 256 MiB, respectively.
+`e70q10_minimal-eng`는 초기 진단용 구성이고, `e70q10_emulator-eng`와
+`e70q10_emulator_armv7-eng`는 에뮬레이터용입니다. 실제 기기의 현재 구성과
+파티션 배치를 기준으로 이미지를 준비해야 합니다. 과거 SD/RAM 부팅 설명을
+현재 eMMC 설치 절차로 그대로 사용하지 마세요.
 
-## Reproduce the minimal build
+프레임워크/gralloc 확장이 있는 변경은 같은 빌드의 system/vendor를 함께
+준비합니다. 커널 변경은 boot/vendor 모듈 호환성도 확인합니다. 업데이터와 GUI
+사용법은 [SD 도구 저장소](https://github.com/INO-33/RIDI_PAPER_PRO_SD_TOOLS)에 있습니다.
 
-Copy this directory to `device/ridi/e70q10` in NXP
-`o8.0.0_1.0.0-ga`, then apply all files under `patches/` from the Android
-source root. The patches remove an include for an unavailable private NXP
-codec, make legacy compiler wrappers find the local Python 2 runtime, and
-allow old kernel host tools to build with a modern GCC.
+## 기기 자산과 이력
 
-```sh
-patch -p1 < device/ridi/e70q10/patches/0001-android8-modern-host-python.patch
-patch -p1 < device/ridi/e70q10/patches/0002-build-without-private-fsl-codec.patch
-patch -p1 < device/ridi/e70q10/patches/0003-kernel-host-fcommon.patch
-patch -p1 < device/ridi/e70q10/patches/0004-surfaceflinger-fix-hwc1-framebuffer-post.patch
-patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
-patch -p1 < device/ridi/e70q10/patches/0006-documentsui-fix-usb-shortcut-color.patch
-patch -p1 < device/ridi/e70q10/patches/0007-framework-eink-policy.patch
-patch -p1 < device/ridi/e70q10/patches/0008-mesa-android-softpipe.patch
-patch -p1 < device/ridi/e70q10/patches/0009-pixelflinger-clip-raster-bounds.patch
-patch -p1 < device/ridi/e70q10/patches/0010-native-eink-policy-transport.patch
-patch -p1 < device/ridi/e70q10/patches/0011-imx-display-eink-policy.patch
-patch -p1 < device/ridi/e70q10/patches/0012-settings-reader-ui.patch
-device/ridi/e70q10/tools/build_android8.sh check
-device/ridi/e70q10/tools/build_android8.sh build ramdisk
-device/ridi/e70q10/tools/build_android8.sh build bootimage
-E70Q10_RAMBOOT_PROFILE=minimal \
-device/ridi/e70q10/tools/make_stock_ramboot.sh
-```
+waveform은 EPDC 초기화에 필요하고, `prebuilt/8189fs.ko`는 선택한 커널과
+호환되어야 합니다. 비공개 기기 자산을 포함하므로 이 저장소를 공개로 바꾸지
+않습니다. WebView 소스는 [Chromium 저장소](https://github.com/INO-33/RIDI_CHROMIUM_M58)에
+별도로 있으며, 제품에 포함된 APK의 해시는 메인 lock 파일에서 확인할 수 있습니다.
 
-The build helper separates output by product. After attaching an ext4 build
-disk, use a clean reference output directory:
+이번 README 교체 전의 상세 포팅 기록은
+[`docs/BRINGUP_HISTORY.md`](docs/BRINGUP_HISTORY.md)에 보존했습니다.
+그 문서에는 초기 단계의 상태와 과거 이미지 경로도 포함됩니다.
 
-```sh
-E70Q10_LUNCH=e70q10_reference-eng \
-E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
-device/ridi/e70q10/tools/build_android8.sh build systemimage vendorimage
-```
-
-Build the reference stock-U-Boot RAM-boot candidate from the same output:
-
-```sh
-E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
-E70Q10_RAMBOOT_PROFILE=reference \
-device/ridi/e70q10/tools/make_stock_ramboot.sh
-```
-
-The first verified build produced
-`out/target/product/e70q10/ramdisk.img` and `boot.img`. The NXP build places
-the DTB in the Android boot image `second` field, while the E70Q10 stock U-Boot
-and the verified diagnostic images use a kernel-appended DTB. Therefore,
-`make_stock_ramboot.sh` creates a separate `second=0` RAM-boot candidate and
-never overwrites the standard build output. Build outputs are deliberately
-excluded from Git.
-
-Graphics backend selection, the AGL/GLES1 recovery path, and the isolated
-Mesa softpipe benchmark procedure are documented in
-[`GRAPHICS_BRINGUP.md`](GRAPHICS_BRINGUP.md).
-
-The reference product uses the positive package allowlist in
-`e70q10_reader_base.mk`. It deliberately avoids `generic_no_telephony`, which
-still pulls phone, Bluetooth, NFC, printing, PIM, music and decoration apps
-into an AOSP Oreo image. Launcher2 remains only as a recovery HOME until Total
-Launcher is packaged as a system application.
-
-This repository is private, so the device-unique blobs the port cannot be
-rebuilt without are committed here:
-
-- `stock-blobs/imx/epdc/epdc_ED078KH1.fw` is the extracted EPDC waveform. The
-  reference product copies it to `/vendor/firmware/imx/epdc/`. Without this
-  file the EPDC driver stays uninitialized and `MXCFB_SEND_UPDATE` returns
-  `EPERM`.
-- `prebuilt/8189fs.ko` is the RTL8189FS Wi-Fi kernel module.
-
-Both are extracted from the device and are not redistributable. Keep this
-repository private, and do not mirror it to a public remote.
-
-Current validation work:
-
-1. Build and deploy the static E Ink framework policy: no starting windows,
-   transitions, recents, lock screen, ripple or animated drawables.
-2. Validate gralloc's changed-region EPDC path: unchanged frames are skipped,
-   small changes use partial AUTO updates, and large or accumulated changes use
-   full GC16 cleanup updates.
-3. Tune partial-update thresholds, temperature handling and suspend/resume.
-4. Bring up RTL8189FS Wi-Fi and finish CYTTSP5 input validation.
-5. Keep all tests on `fastboot boot` plus external SD until recovery and
-   power-management behavior are proven.
+현재 체크포인트는 2026-10-16입니다. 최종 저전압 종료 화면 등 실기기에서
+계속 확인할 항목이 있으며, 소스 업로드가 모든 기능 검증 완료를 의미하지는 않습니다.

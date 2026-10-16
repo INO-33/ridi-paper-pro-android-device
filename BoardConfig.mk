@@ -9,6 +9,9 @@ include device/fsl/imx6/imx6_target_fs.mk
 
 TARGET_BOOTLOADER_BOARD_NAME := E70Q10
 PRODUCT_MODEL := RIDI_PAPER_PRO
+# Settings build number: Korean build date and maintainer name.
+# DATE uses BUILD_DATETIME, so reproducible builds retain their chosen date.
+TARGET_BUILD_DISPLAY_ID := $(shell TZ=Asia/Seoul $(DATE) +%Y.%m.%d)-juwon
 TARGET_KERNEL_DEFCONF := e70q10_defconfig
 TARGET_BOARD_DTS_CONFIG := imx6sl:imx6sl-e70q10.dtb
 
@@ -30,10 +33,19 @@ ifeq ($(E70Q10_GRAPHICS_BACKEND),mesa)
 BOARD_GPU_DRIVERS := swrast
 endif
 
+# Stock ntx_prebooti uses a 500-byte sprintf buffer including its own args.
+# Keep room for those args and "setenv bootargs ". Kernel console already
+# selects ttymxc0; NTX appends mem=1018M; default console loglevel is 7.
+BOARD_BOOTLOADER_CMDLINE_LIMIT := 240
 BOARD_KERNEL_CMDLINE := console=ttymxc0,115200 init=/init \
-    androidboot.console=ttymxc0 consoleblank=0 no_console_suspend \
-    androidboot.hardware=E70Q10 video=mxcepdcfb:ED078KH1,bpp=16 mem=1018M \
-    panic=10 oops=panic loglevel=7
+    consoleblank=0 no_console_suspend \
+    androidboot.hardware=E70Q10 video=mxcepdcfb:ED078KH1,bpp=16 \
+    panic=10 oops=panic
+
+# EPDC firmware lives on vendor, outside the kernel's /lib/firmware defaults.
+# Suspend preparation caches it again: load it directly rather than emitting
+# a uevent to ueventd, which can abort freeze and repeat after retry backoff.
+BOARD_KERNEL_CMDLINE += firmware_class.path=/vendor/firmware
 
 ifneq ($(TARGET_BUILD_VARIANT),user)
 BOARD_KERNEL_CMDLINE += androidboot.selinux=permissive

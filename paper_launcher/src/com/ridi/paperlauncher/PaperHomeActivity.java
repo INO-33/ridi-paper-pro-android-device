@@ -139,6 +139,7 @@ public final class PaperHomeActivity extends Activity {
         private final Paint imagePaint = new Paint(Paint.FILTER_BITMAP_FLAG);
         private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         private final Paint clockPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint datePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint movePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Bitmap background;
         private final Bitmap flapBack;
@@ -169,6 +170,8 @@ public final class PaperHomeActivity extends Activity {
             clockPaint.setTextSize(308f * CLOCK_SCALE);
             clockPaint.setTextAlign(Paint.Align.CENTER);
             clockPaint.setTypeface(Typeface.createFromAsset(getAssets(), "RozhaOne.ttf"));
+            datePaint.set(clockPaint);
+            datePaint.setTextSize(72f * CLOCK_SCALE);
             movePaint.setColor(Color.BLACK);
             movePaint.setStyle(Paint.Style.STROKE);
             movePaint.setStrokeWidth(3f);
@@ -304,7 +307,10 @@ public final class PaperHomeActivity extends Activity {
         }
 
         private void drawFlapClock(Canvas canvas) {
-            String digits = DateFormat.format("HHmm", new Date()).toString();
+            Date now = new Date();
+            canvas.drawText(DateFormat.format("yyyy/MM/dd", now).toString(),
+                    IMAGE_WIDTH / 2f, CLOCK_CARD_TOP - 36f * CLOCK_SCALE, datePaint);
+            String digits = DateFormat.format("HHmm", now).toString();
             float clockWidth = 4f * CLOCK_CARD_WIDTH + 2f * CLOCK_PAIR_GAP
                     + CLOCK_MIDDLE_GAP;
             float left = (IMAGE_WIDTH - clockWidth) / 2f;
