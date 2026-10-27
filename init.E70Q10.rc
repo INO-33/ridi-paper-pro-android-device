@@ -4,28 +4,15 @@ on early-init
     write /proc/sys/kernel/panic 10
     mount debugfs debugfs /sys/kernel/debug mode=0755
     wait /dev/block/mmcblk1p1
-    mkdir /e70log 0770 root root
-    mount vfat /dev/block/mmcblk1p1 /e70log rw noatime nosuid nodev
-    mkdir /e70log/ridi-dev 0770 root root
-    mkdir /e70log/ridi-dev/logs 0770 root root
-    mkdir /e70log/ridi-dev/logs/android8-current 0770 root root
-    write /e70log/ridi-dev/logs/android8-current/stage "early-init"
-    copy /proc/cmdline /e70log/ridi-dev/logs/android8-current/cmdline.txt
-    copy /proc/partitions /e70log/ridi-dev/logs/android8-current/partitions-early.txt
 
 on fs
     # Only external SD partitions are present in this fstab.
-    write /e70log/ridi-dev/logs/android8-current/stage "fs-before-mount-all"
     # The ramdisk contains empty /system and /vendor mount points. Android
     # init otherwise marks their rc directories as already scanned before the
     # external SD is mounted and skips the default late import.
     mount_all /fstab.E70Q10 /system/etc/init /vendor/etc/init
-    write /e70log/ridi-dev/logs/android8-current/stage "fs-after-mount-all"
-    copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-after-fs.txt
 
 on post-fs
-    write /e70log/ridi-dev/logs/android8-current/stage "post-fs"
-    copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-post-fs.txt
 
     # zram swap. This runs after "on fs" mount_all because fs_mgr shells out to
     # /system/bin/mkswap, which is a toybox symlink on the mounted system image.
@@ -45,8 +32,6 @@ on post-fs
     setprop wlan.driver.status ok
 
 on post-fs-data
-    write /e70log/ridi-dev/logs/android8-current/stage "post-fs-data"
-    copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-post-fs-data.txt
     mkdir /data/ridi 0770 system system
     mkdir /data/ridi/logs 0770 system system
     mkdir /data/ridi/logs/power-diag 0700 root root
@@ -54,8 +39,6 @@ on post-fs-data
     start e70q10_wifi_prepare
 
 on boot
-    write /e70log/ridi-dev/logs/android8-current/stage "boot"
-    copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-boot.txt
     # i.MX6SoloLite has no 3D GPU. Match NXP's 6SL EVK policy and keep
     # application View rendering on the CPU-backed Skia Canvas path.
     setprop sys.viewroot.hw false
@@ -105,9 +88,6 @@ on boot
     write /sys/devices/system/cpu/cpufreq/interactive/io_is_busy 1
 
 on property:sys.boot_completed=1
-    write /e70log/ridi-dev/logs/android8-current/stage "boot-completed"
-    copy /proc/mounts /e70log/ridi-dev/logs/android8-current/mounts-boot-completed.txt
-    write /dev/kmsg "E70Q10_ANDROID_BOOT_COMPLETED"
     start e70q10_eink_defaults
 
 # Optional suspend/battery recorder. Enable with

@@ -1,0 +1,5 @@
+config RTL8189FS
+	tristate "Realtek 8189F SDIO WiFi"
+	depends on MMC && CFG80211
+	---help---
+	  Realtek RTL8189FTV/RTL8188F SDIO Wi-Fi support.

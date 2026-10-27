@@ -9,9 +9,9 @@ include device/fsl/imx6/imx6_target_fs.mk
 
 TARGET_BOOTLOADER_BOARD_NAME := E70Q10
 PRODUCT_MODEL := RIDI_PAPER_PRO
-# Settings build number: Korean build date and maintainer name.
+# Settings build number: Korean build date and RIDI8 release label.
 # DATE uses BUILD_DATETIME, so reproducible builds retain their chosen date.
-TARGET_BUILD_DISPLAY_ID := $(shell TZ=Asia/Seoul $(DATE) +%Y.%m.%d)-juwon
+TARGET_BUILD_DISPLAY_ID := $(shell TZ=Asia/Seoul $(DATE) +%Y.%m.%d)-RIDI8
 TARGET_KERNEL_DEFCONF := e70q10_defconfig
 TARGET_BOARD_DTS_CONFIG := imx6sl:imx6sl-e70q10.dtb
 

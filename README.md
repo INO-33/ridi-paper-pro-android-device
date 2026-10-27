@@ -37,18 +37,29 @@ Android 8용 RIDI PAPER PRO(E70Q10) 제품 정의입니다. 보드 설정, init/
 ## 기기 자산과 이력
 
 waveform은 EPDC 초기화에 필요하고, `prebuilt/8189fs.ko`는 선택한 커널과
-호환되어야 합니다. 비공개 기기 자산을 포함하므로 이 저장소를 공개로 바꾸지
-않습니다. WebView 소스는 [Chromium 저장소](https://github.com/INO-33/ridi-paper-pro-webview)에
+호환되어야 합니다. waveform·이미지 등 자산은 출처와 개별 배포 조건을 확인합니다. Wi-Fi는 GPL 공개 소스와 함께 보존합니다. WebView 소스는 [Chromium 저장소](https://github.com/INO-33/ridi-paper-pro-webview)에
 별도로 있으며, 제품에 포함된 APK의 해시는 메인 lock 파일에서 확인할 수 있습니다.
 
 이번 README 교체 전의 상세 포팅 기록은
 [`docs/BRINGUP_HISTORY.md`](docs/BRINGUP_HISTORY.md)에 보존했습니다.
 그 문서에는 초기 단계의 상태와 과거 이미지 경로도 포함됩니다.
 
-현재 체크포인트는 2026-10-16입니다. 최종 저전압 종료 화면 등 실기기에서
+현재 체크포인트는 2026-10-27입니다. 최종 저전압 종료 화면 등 실기기에서
 계속 확인할 항목이 있으며, 소스 업로드가 모든 기능 검증 완료를 의미하지는 않습니다.
 
 ## 개발환경과 공개 전 자산 검토
 
 처음 구성하는 개발자는 메인 저장소의 [개발환경 구축 안내](https://github.com/INO-33/ridi-paper-pro/blob/checkpoint-20261016/DEVELOPMENT.md)를 따릅니다.
 공개 전 제외·확인 대상은 [공개 자산 목록](https://github.com/INO-33/ridi-paper-pro/blob/checkpoint-20261016/PUBLIC_ASSETS.md)에 있습니다.
+
+
+## Wi-Fi 모듈 재빌드
+
+`wifi/rtl8189fs`에 대응 소스, `wifi/SOURCE_PROVENANCE.json`에 출처·해시,
+`wifi/RIDI-adaptations.patch`에 RIDI 변경을 포함합니다. 먼저 제품 `kernelimage`를
+빌드하고 개발 도구의 `build-wifi.py`를 실행한 뒤 `E70Q10_WIFI_MODULE`을 생성한
+모듈 경로로 지정해 boot/system/vendor를 준비합니다. 기본 prebuilt의 ABI가 새 Git
+체크아웃에서 빌드한 커널과 같다고 가정하지 않습니다. 메인 DEVELOPMENT.md를 따르세요.
+
+Rozha One 폰트는 Google Fonts 원본과 SHA256이 일치하며 OFL 고지를 assets에 포함합니다.
+과거 포팅 문서의 비공개 표기는 최신 공개 자산 검토 문서와 구분합니다.

@@ -1,0 +1,232 @@
+--- a/os_dep/linux/ioctl_cfg80211.c
++++ b/os_dep/linux/ioctl_cfg80211.c
+@@ -883,7 +883,13 @@
+ 			cfg80211_connect_result(padapter->pnetdev, NULL, NULL, 0, NULL, 0, 
+ 				WLAN_STATUS_UNSPECIFIED_FAILURE, GFP_ATOMIC/*GFP_KERNEL*/);
+ 		else if(pwdev->sme_state==CFG80211_SME_CONNECTED)
+-			cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0, GFP_ATOMIC);
++			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
++			cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0,
++				_TRUE, GFP_ATOMIC);
++			#else
++			cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0,
++				GFP_ATOMIC);
++			#endif
+ 		//else
+ 			//DBG_8192C("pwdev->sme_state=%d\n", pwdev->sme_state);
+ 
+@@ -892,7 +898,13 @@
+ 
+ 		if (check_fwstate(&padapter->mlmepriv, _FW_LINKED)) {
+ 			DBG_871X(FUNC_ADPT_FMT" call cfg80211_disconnected\n", FUNC_ADPT_ARG(padapter));
+-			cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0, GFP_ATOMIC);
++			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
++			cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0,
++				_TRUE, GFP_ATOMIC);
++			#else
++			cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0,
++				GFP_ATOMIC);
++			#endif
+ 		} else {
+ 			DBG_871X(FUNC_ADPT_FMT" call cfg80211_connect_result\n", FUNC_ADPT_ARG(padapter));
+ 			cfg80211_connect_result(padapter->pnetdev, NULL, NULL, 0, NULL, 0, 
+@@ -2036,6 +2048,11 @@
+ {
+ 	struct rtw_wdev_priv *pwdev_priv = adapter_wdev_data(adapter);
+ 	_irqL	irqL;
++	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
++	struct cfg80211_scan_info info = {
++		.aborted = aborted,
++	};
++	#endif
+ 
+ 	_enter_critical_bh(&pwdev_priv->scan_req_lock, &irqL);
+ 	if (pwdev_priv->scan_request != NULL) {
+@@ -2050,7 +2067,11 @@
+ 		}
+ 		else
+ 		{
++			#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 8, 0))
++			cfg80211_scan_done(pwdev_priv->scan_request, &info);
++			#else
+ 			cfg80211_scan_done(pwdev_priv->scan_request, aborted);
++			#endif
+ 		}
+ 
+ 		pwdev_priv->scan_request = NULL;
+@@ -6870,7 +6891,13 @@
+ 	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)) || defined(COMPAT_KERNEL_RELEASE)	
+ 	if (wdev->current_bss) {
+ 		DBG_871X(FUNC_ADPT_FMT" clear current_bss by cfg80211_disconnected\n", FUNC_ADPT_ARG(adapter));
+-		cfg80211_disconnected(adapter->pnetdev, 0, NULL, 0, GFP_ATOMIC);
++		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
++		cfg80211_disconnected(adapter->pnetdev, 0, NULL, 0,
++			_TRUE, GFP_ATOMIC);
++		#else
++		cfg80211_disconnected(adapter->pnetdev, 0, NULL, 0,
++			GFP_ATOMIC);
++		#endif
+ 	}
+ 	#endif
+ 
+@@ -6993,4 +7020,3 @@
+ }
+ 
+ #endif /* CONFIG_IOCTL_CFG80211 */
+-
+--- a/os_dep/linux/os_intfs.c
++++ b/os_dep/linux/os_intfs.c
+@@ -4148,8 +4148,13 @@
+ 
+ 	if (pwrpriv->wowlan_wake_reason == RX_PNOWakeUp) {
+ #ifdef CONFIG_IOCTL_CFG80211	
++		#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
++		cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0,
++				_TRUE, GFP_ATOMIC);
++		#else
+ 		cfg80211_disconnected(padapter->pnetdev, 0, NULL, 0,
+ 				GFP_ATOMIC);
++		#endif
+ #endif
+ 		rtw_lock_ext_suspend_timeout(10000);
+ 	}
+@@ -4551,4 +4556,3 @@
+ EXPORT_SYMBOL(rtw_disable_gpio_interrupt);
+ 
+ #endif //#ifdef CONFIG_GPIO_API 
+-
+--- a/os_dep/linux/rtw_proc.c
++++ b/os_dep/linux/rtw_proc.c
+@@ -1146,6 +1146,7 @@
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_LOAD_PHY_PARA_FROM_FILE
+ static ssize_t proc_set_tx_power_ext_info(struct file *file, const char __user *buffer, size_t count, loff_t *pos, void *data)
+ {
+ 	struct net_device *dev = data;
+@@ -1181,6 +1182,7 @@
+ 
+ 	return count;
+ }
++#endif
+ 
+ static void *proc_start_tx_power_idx(struct seq_file *m, loff_t *pos)
+ {
+@@ -1926,7 +1928,11 @@
+ 	RTW_PROC_HDL_SSEQ("target_tx_power", proc_get_target_tx_power, NULL),
+ 	RTW_PROC_HDL_SSEQ("tx_power_by_rate", proc_get_tx_power_by_rate, NULL),
+ 	RTW_PROC_HDL_SSEQ("tx_power_limit", proc_get_tx_power_limit, NULL),
++#ifdef CONFIG_LOAD_PHY_PARA_FROM_FILE
+ 	RTW_PROC_HDL_SSEQ("tx_power_ext_info", proc_get_tx_power_ext_info, proc_set_tx_power_ext_info),
++#else
++	RTW_PROC_HDL_SSEQ("tx_power_ext_info", proc_get_tx_power_ext_info, NULL),
++#endif
+ 	RTW_PROC_HDL_SEQ("tx_power_idx", &seq_ops_tx_power_idx, NULL),
+ #ifdef CONFIG_RF_GAIN_OFFSET
+ 	RTW_PROC_HDL_SSEQ("tx_gain_offset", NULL, proc_set_tx_gain_offset),
+--- a/Kconfig
++++ b/Kconfig
+@@ -1,5 +1,5 @@
+ config RTL8189FS
+ 	tristate "Realtek 8189F SDIO WiFi"
+-	depends on USB
++	depends on MMC && CFG80211
+ 	---help---
+-	  Help message of RTL8189FS
++	  Realtek RTL8189FTV/RTL8188F SDIO Wi-Fi support.
+--- a/include/autoconf.h
++++ b/include/autoconf.h
+@@ -48,9 +48,12 @@
+ 	 * RTW_USE_CFG80211_STA_EVENT must be defiend!
+ 	 */
+ //	#define RTW_USE_CFG80211_STA_EVENT /* Indecate new sta asoc through cfg80211_new_sta */
+-	#ifndef CONFIG_PLATFORM_INTEL_BYT
+-	#define CONFIG_CFG80211_FORCE_COMPATIBLE_2_6_37_UNDER
+-	#endif //!CONFIG_PLATFORM_INTEL_BYT
++	/*
++	 * This switch selects pre-2.6.37 cfg80211 notification APIs.  Those
++	 * entry points were removed long before Linux 4.9, so never force the
++	 * legacy path on the E70Q10 kernel.
++	 */
++	/* CONFIG_CFG80211_FORCE_COMPATIBLE_2_6_37_UNDER intentionally disabled. */
+ 	//#define CONFIG_DEBUG_CFG80211
+ 	#define CONFIG_SET_SCAN_DENY_TIMER
+ 	/*#define SUPPLICANT_RTK_VERSION_LOWER_THAN_JB42*/ /* wpa_supplicant realtek version <= jb42 will be defined this */
+@@ -241,4 +244,3 @@
+ //#define DBG_CHECK_FW_PS_STATE
+ //#define DBG_CHECK_FW_PS_STATE_H2C
+ //#define CONFIG_FW_C2H_DEBUG 
+-
+--- a/include/osdep_service_linux.h
++++ b/include/osdep_service_linux.h
+@@ -87,6 +87,23 @@
+ #ifdef CONFIG_IOCTL_CFG80211
+ /*	#include <linux/ieee80211.h> */
+ 	#include <net/cfg80211.h>
++
++	/*
++	 * cfg80211 renamed ieee80211_band to nl80211_band in Linux 4.7.
++	 * Preserve the vendor driver's older names when building on 4.9.
++	 */
++	#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0))
++		#define ieee80211_band nl80211_band
++		#ifndef IEEE80211_BAND_2GHZ
++			#define IEEE80211_BAND_2GHZ NL80211_BAND_2GHZ
++		#endif
++		#ifndef IEEE80211_BAND_5GHZ
++			#define IEEE80211_BAND_5GHZ NL80211_BAND_5GHZ
++		#endif
++		#ifndef IEEE80211_NUM_BANDS
++			#define IEEE80211_NUM_BANDS NUM_NL80211_BANDS
++		#endif
++	#endif
+ #endif //CONFIG_IOCTL_CFG80211
+ 
+ #ifdef CONFIG_TCP_CSUM_OFFLOAD_TX
+@@ -426,4 +443,3 @@
+ 
+ 
+ #endif
+-
+--- a/Makefile
++++ b/Makefile
+@@ -43,6 +43,10 @@
+ CONFIG_SDIO_HCI = y
+ CONFIG_GSPI_HCI = n
+ ########################## Features ###########################
++# Realtek 4.3.24.10 headers expose a few shared firmware/EFUSE types only
++# under CONFIG_MP_INCLUDED, while non-MP debug and HAL code still references
++# those types.  Keep the vendor setting for source consistency; MP mode is not
++# enabled at runtime.
+ CONFIG_MP_INCLUDED = y
+ CONFIG_POWER_SAVING = y
+ CONFIG_USB_AUTOSUSPEND = n
+@@ -54,7 +58,9 @@
+ CONFIG_EFUSE_CONFIG_FILE = n
+ CONFIG_EXT_CLK = n
+ CONFIG_TRAFFIC_PROTECT = y
+-CONFIG_LOAD_PHY_PARA_FROM_FILE = y
++# RTL8189FTV firmware/PHY tables are embedded in this driver.  Avoid relying
++# on Android filesystem availability during early module probe.
++CONFIG_LOAD_PHY_PARA_FROM_FILE = n
+ CONFIG_TXPWR_BY_RATE_EN = y
+ CONFIG_TXPWR_LIMIT_EN = y
+ CONFIG_RTW_ADAPTIVITY_EN = enable
+@@ -1167,8 +1173,9 @@
+ ifeq ($(CONFIG_PLATFORM_ARM_MX6), y)
+ EXTRA_CFLAGS += -DCONFIG_LITTLE_ENDIAN 
+ EXTRA_CFLAGS += -DCONFIG_IOCTL_CFG80211
+-EXTRA_CFLAGS += -DRTW_ENABLE_WIFI_CONTROL_FUNC
+-EXTRA_CFLAGS += -DCONFIG_CONCURRENT_MODE
++# E70Q10 power sequencing and SDIO enumeration are handled by DT/mmc-pwrseq.
++# The old Netronix platform-device control hook is absent from the DT kernel.
++# Single wlan0 station mode is sufficient for this reader.
+ 
+ ARCH := arm
+ #CROSS_COMPILE := /opt/freescale/usr/local/gcc-4.6.2-glibc-2.13-linaro-multilib-2011.12/fsl-linaro-toolchain/bin/arm-none-linux-gnueabi-
+@@ -1751,4 +1758,3 @@
+ 	rm -fr *.mod.c *.mod *.o .*.cmd *.ko *~
+ 	rm -fr .tmp_versions
+ endif
+-
