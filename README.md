@@ -63,3 +63,11 @@ waveform은 EPDC 초기화에 필요하고, `prebuilt/8189fs.ko`는 선택한 �
 
 Rozha One 폰트는 Google Fonts 원본과 SHA256이 일치하며 OFL 고지를 assets에 포함합니다.
 과거 포팅 문서의 비공개 표기는 최신 공개 자산 검토 문서와 구분합니다.
+
+
+## 사용 대상과 라이선스
+
+기존 리디 페이퍼 프로 사용자를 위한 프로젝트입니다. [LICENSING.md](LICENSING.md)와
+[DEVICE_ASSETS.md](DEVICE_ASSETS.md)를 확인하세요. 타 기기 포팅에서는 기기 유래 자산을 제외합니다.
+기존 코드·드라이버·폰트의 오픈소스 라이선스는 그대로 유지합니다.
+과거 포팅 기록과 설명이 다를 경우 이 라이선스 문서와 메인 PUBLIC_ASSETS.md의 최신 검토를 기준으로 합니다.
