@@ -22,6 +22,9 @@ Android 8용 RIDI PAPER PRO(E70Q10) 제품 정의입니다. 보드 설정, init/
 
 ```sh
 "$ANDROID_BUILD_TOP/ridi-build-support/build.sh" check e70q10_reference-eng
+"$ANDROID_BUILD_TOP/ridi-build-support/build.sh" build e70q10_reference-eng kernelimage
+python3 "$ANDROID_BUILD_TOP/ridi-build-support/build-wifi.py"
+export E70Q10_WIFI_MODULE="${E70Q10_OUT_DIR:-$RIDI_WORKSPACE/android-out/e70q10_reference}/wifi/8189fs.ko"
 "$ANDROID_BUILD_TOP/ridi-build-support/build.sh" build e70q10_reference-eng bootimage systemimage vendorimage
 ```
 
