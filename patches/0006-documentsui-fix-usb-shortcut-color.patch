@@ -1,0 +1,13 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] DocumentsUI: fix USB adaptive icon color typo
+
+Apply from the Android source root:
+
+  patch -p1 < device/ridi/e70q10/patches/0006-documentsui-fix-usb-shortcut-color.patch
+
+diff --git a/packages/apps/DocumentsUI/res/drawable/ic_usb_shortcut.xml b/packages/apps/DocumentsUI/res/drawable/ic_usb_shortcut.xml
+--- a/packages/apps/DocumentsUI/res/drawable/ic_usb_shortcut.xml
++++ b/packages/apps/DocumentsUI/res/drawable/ic_usb_shortcut.xml
+@@ -28 +28 @@
+-                    android:fillColor="@color/ic_shorcut_foreground"
++                    android:fillColor="@color/shortcut_foreground"

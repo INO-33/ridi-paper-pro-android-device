@@ -1,0 +1,2320 @@
+From: RIDI Paper Pro Android 8 bring-up
+Subject: [PATCH] Settings: RIDI reader settings, front light and Wi-Fi screens
+Apply from the Android source root:
+  patch -p1 < device/ridi/e70q10/patches/0012-settings-reader-ui.patch
+diff --git a/packages/apps/Settings/AndroidManifest.xml b/packages/apps/Settings/AndroidManifest.xml
+index 5419fac..c102914 100644
+--- a/packages/apps/Settings/AndroidManifest.xml
++++ b/packages/apps/Settings/AndroidManifest.xml
+@@ -100,14 +100,48 @@
+ 
+         <!-- Settings -->
+ 
+-        <activity android:name="Settings"
++        <activity android:name=".ridi.RidiReaderSettingsActivity"
+                 android:taskAffinity="com.android.settings"
+                 android:label="@string/settings_label_launcher"
+-                android:launchMode="singleTask">
+-            <intent-filter android:priority="1">
++                android:launchMode="singleTask"
++                android:screenOrientation="portrait"
++                android:theme="@style/Theme.Settings.NoActionBar"
++                android:exported="true">
++            <intent-filter android:priority="20">
+                 <action android:name="android.settings.SETTINGS" />
+                 <category android:name="android.intent.category.DEFAULT" />
+             </intent-filter>
++            <intent-filter android:priority="20">
++                <action android:name="android.intent.action.MAIN" />
++                <category android:name="android.intent.category.DEFAULT" />
++                <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter>
++        </activity>
++
++        <activity android:name=".ridi.RidiFrontlightActivity"
++                android:label="@string/ridi_frontlight"
++                android:parentActivityName=".ridi.RidiReaderSettingsActivity"
++                android:screenOrientation="portrait"
++                android:theme="@style/Theme.Settings.RidiFrontlightPanel"
++                android:exported="true" />
++
++        <activity android:name=".ridi.RidiWifiSettingsActivity"
++                android:label="Wi-Fi"
++                android:parentActivityName=".ridi.RidiReaderSettingsActivity"
++                android:screenOrientation="portrait"
++                android:theme="@style/Theme.Settings.NoActionBar"
++                android:exported="true" />
++
++        <provider
++                android:name=".ridi.RidiFrontlightProvider"
++                android:authorities="com.android.settings.ridi.frontlight"
++                android:exported="true"
++                android:permission="android.permission.STATUS_BAR_SERVICE" />
++
++        <activity android:name="Settings"
++                android:taskAffinity="com.android.settings"
++                android:label="@string/settings_label_launcher"
++                android:launchMode="singleTask">
+             <meta-data android:name="com.android.settings.PRIMARY_PROFILE_CONTROLLED"
+                 android:value="true" />
+         </activity>
+@@ -118,11 +152,6 @@
+                 android:label="@string/settings_label_launcher"
+                 android:launchMode="singleTask"
+                 android:targetActivity="Settings">
+-            <intent-filter>
+-                <action android:name="android.intent.action.MAIN" />
+-                <category android:name="android.intent.category.DEFAULT" />
+-                <category android:name="android.intent.category.LAUNCHER" />
+-            </intent-filter>
+             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts"/>
+         </activity-alias>
+ 
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_brightness_minus.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_brightness_minus.png
+new file mode 100644
+index 0000000..f8e415b
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_brightness_minus.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_brightness_plus.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_brightness_plus.png
+new file mode 100644
+index 0000000..b7a2adf
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_brightness_plus.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_frontlight_brightness.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_frontlight_brightness.png
+new file mode 100644
+index 0000000..f9a13be
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_frontlight_brightness.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_frontlight_color.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_frontlight_color.png
+new file mode 100644
+index 0000000..d1d329b
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_frontlight_color.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_applications.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_applications.png
+new file mode 100644
+index 0000000..91ec5fd
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_applications.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_battery.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_battery.png
+new file mode 100644
+index 0000000..c8535e9
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_battery.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_date.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_date.png
+new file mode 100644
+index 0000000..39b5c5f
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_date.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_device_info.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_device_info.png
+new file mode 100644
+index 0000000..35d8519
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_device_info.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_frontlight.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_frontlight.png
+new file mode 100644
+index 0000000..f9a13be
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_frontlight.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_notification.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_notification.png
+new file mode 100644
+index 0000000..e03e542
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_notification.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_reboot.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_reboot.png
+new file mode 100644
+index 0000000..aeb9b80
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_reboot.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_refresh.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_refresh.png
+new file mode 100644
+index 0000000..6d565d3
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_refresh.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_shutdown.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_shutdown.png
+new file mode 100644
+index 0000000..aeb9b80
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_shutdown.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_sleep.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_sleep.png
+new file mode 100644
+index 0000000..95a8a0b
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_sleep.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_storage.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_storage.png
+new file mode 100644
+index 0000000..965613a
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_storage.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_wifi.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_wifi.png
+new file mode 100644
+index 0000000..ab0bf2d
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_icon_wifi.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_panel_back.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_panel_back.png
+new file mode 100644
+index 0000000..cafc882
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_panel_back.png differ
+diff --git a/packages/apps/Settings/res/drawable-xhdpi/ridi_panel_icon_settings.png b/packages/apps/Settings/res/drawable-xhdpi/ridi_panel_icon_settings.png
+new file mode 100644
+index 0000000..36e1918
+Binary files /dev/null and b/packages/apps/Settings/res/drawable-xhdpi/ridi_panel_icon_settings.png differ
+diff --git a/packages/apps/Settings/res/drawable/ridi_brightness_button.xml b/packages/apps/Settings/res/drawable/ridi_brightness_button.xml
+new file mode 100644
+index 0000000..c7e6fb0
+--- /dev/null
++++ b/packages/apps/Settings/res/drawable/ridi_brightness_button.xml
+@@ -0,0 +1,16 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Reconstructed from stock brightness_bg_plus_minus_btn. -->
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle">
++            <solid android:color="#ff000000" />
++            <corners android:radius="4dp" />
++        </shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff" />
++            <corners android:radius="4dp" />
++        </shape>
++    </item>
++</selector>
+diff --git a/packages/apps/Settings/res/drawable/ridi_panel_background.xml b/packages/apps/Settings/res/drawable/ridi_panel_background.xml
+new file mode 100644
+index 0000000..7c64579
+--- /dev/null
++++ b/packages/apps/Settings/res/drawable/ridi_panel_background.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Reconstructed from stock drawable/panel_bg. -->
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <solid android:color="#ffffffff" />
++    <stroke
++        android:width="1dp"
++        android:color="#ff000000" />
++    <corners android:radius="4dp" />
++    <padding
++        android:left="1dp"
++        android:top="1dp"
++        android:right="1dp"
++        android:bottom="1dp" />
++</shape>
+diff --git a/packages/apps/Settings/res/drawable/ridi_row_background.xml b/packages/apps/Settings/res/drawable/ridi_row_background.xml
+new file mode 100644
+index 0000000..54acf0b
+--- /dev/null
++++ b/packages/apps/Settings/res/drawable/ridi_row_background.xml
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle">
++            <solid android:color="#ffe0e0e0"/>
++        </shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff"/>
++        </shape>
++    </item>
++</selector>
+diff --git a/packages/apps/Settings/res/drawable/ridi_row_divider.xml b/packages/apps/Settings/res/drawable/ridi_row_divider.xml
+new file mode 100644
+index 0000000..6094591
+--- /dev/null
++++ b/packages/apps/Settings/res/drawable/ridi_row_divider.xml
+@@ -0,0 +1,5 @@
++<?xml version="1.0" encoding="utf-8"?>
++<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
++    <solid android:color="#ffb0b0b0"/>
++    <size android:height="1dp"/>
++</shape>
+diff --git a/packages/apps/Settings/res/drawable/ridi_step_button.xml b/packages/apps/Settings/res/drawable/ridi_step_button.xml
+new file mode 100644
+index 0000000..2feadf2
+--- /dev/null
++++ b/packages/apps/Settings/res/drawable/ridi_step_button.xml
+@@ -0,0 +1,15 @@
++<?xml version="1.0" encoding="utf-8"?>
++<selector xmlns:android="http://schemas.android.com/apk/res/android">
++    <item android:state_pressed="true">
++        <shape android:shape="rectangle">
++            <solid android:color="#ff111111"/>
++            <stroke android:width="2dp" android:color="#ff111111"/>
++        </shape>
++    </item>
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff"/>
++            <stroke android:width="2dp" android:color="#ff111111"/>
++        </shape>
++    </item>
++</selector>
+diff --git a/packages/apps/Settings/res/drawable/ridi_tab_selected.xml b/packages/apps/Settings/res/drawable/ridi_tab_selected.xml
+new file mode 100644
+index 0000000..2e96d74
+--- /dev/null
++++ b/packages/apps/Settings/res/drawable/ridi_tab_selected.xml
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="utf-8"?>
++<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
++    <item>
++        <shape android:shape="rectangle">
++            <solid android:color="#ffffffff"/>
++        </shape>
++    </item>
++    <item android:gravity="bottom" android:height="2dp">
++        <shape android:shape="rectangle">
++            <solid android:color="#ff000000"/>
++        </shape>
++    </item>
++</layer-list>
+diff --git a/packages/apps/Settings/res/layout/ridi_frontlight_column.xml b/packages/apps/Settings/res/layout/ridi_frontlight_column.xml
+new file mode 100644
+index 0000000..808c7c0
+--- /dev/null
++++ b/packages/apps/Settings/res/layout/ridi_frontlight_column.xml
+@@ -0,0 +1,89 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Structure follows stock activity_brightness.xml and its 53dp controls. -->
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:gravity="center_horizontal"
++    android:orientation="vertical"
++    android:paddingStart="16dp"
++    android:paddingEnd="16dp"
++    android:paddingBottom="14dp">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="48dp"
++        android:gravity="center"
++        android:orientation="horizontal">
++
++        <ImageView
++            android:id="@+id/control_icon"
++            android:layout_width="40dp"
++            android:layout_height="40dp"
++            android:contentDescription="@null" />
++
++        <TextView
++            android:id="@+id/control_title"
++            android:layout_width="wrap_content"
++            android:layout_height="match_parent"
++            android:drawablePadding="7dp"
++            android:gravity="center_vertical"
++            android:textColor="#ff000000"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++    </LinearLayout>
++
++    <TextView
++        android:id="@+id/high_label"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:layout_marginTop="10dp"
++        android:gravity="center"
++        android:textColor="#ff666666"
++        android:textSize="14sp" />
++
++    <ImageButton
++        android:id="@+id/increase"
++        android:layout_width="53dp"
++        android:layout_height="53dp"
++        android:layout_marginTop="10dp"
++        android:background="@drawable/ridi_brightness_button"
++        android:contentDescription="@null"
++        android:src="@drawable/ridi_brightness_plus" />
++
++    <!-- The level stack itself is the control: drag it to set the value. -->
++    <com.android.settings.ridi.RidiLevelBar
++        android:id="@+id/level_stack"
++        android:layout_width="66dp"
++        android:layout_height="0dp"
++        android:layout_marginTop="16dp"
++        android:layout_weight="1"
++        android:contentDescription="@null" />
++
++    <TextView
++        android:id="@+id/level_text"
++        android:layout_width="match_parent"
++        android:layout_height="28dp"
++        android:layout_marginTop="6dp"
++        android:gravity="center"
++        android:includeFontPadding="false"
++        android:textColor="#ff000000"
++        android:textSize="14sp" />
++
++    <ImageButton
++        android:id="@+id/decrease"
++        android:layout_width="53dp"
++        android:layout_height="53dp"
++        android:layout_marginTop="6dp"
++        android:background="@drawable/ridi_brightness_button"
++        android:contentDescription="@null"
++        android:src="@drawable/ridi_brightness_minus" />
++
++    <TextView
++        android:id="@+id/low_label"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:layout_marginTop="10dp"
++        android:gravity="center"
++        android:textColor="#ff666666"
++        android:textSize="14sp" />
++</LinearLayout>
+diff --git a/packages/apps/Settings/res/layout/ridi_frontlight_settings.xml b/packages/apps/Settings/res/layout/ridi_frontlight_settings.xml
+new file mode 100644
+index 0000000..00d051a
+--- /dev/null
++++ b/packages/apps/Settings/res/layout/ridi_frontlight_settings.xml
+@@ -0,0 +1,53 @@
++<?xml version="1.0" encoding="utf-8"?>
++<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:background="@drawable/ridi_panel_background">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:orientation="vertical">
++
++        <TextView
++            android:id="@+id/frontlight_back"
++            android:layout_width="match_parent"
++            android:layout_height="@dimen/ridi_title_height"
++            android:background="@drawable/ridi_row_background"
++            android:drawableStart="@drawable/ridi_panel_back"
++            android:drawablePadding="7dp"
++            android:gravity="center_vertical"
++            android:paddingStart="5dp"
++            android:text="@string/ridi_frontlight"
++            android:textColor="#ff000000"
++            android:textSize="18sp"
++            android:textStyle="bold" />
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="0dp"
++            android:layout_weight="1"
++            android:baselineAligned="false"
++            android:orientation="horizontal">
++
++            <include
++                android:id="@+id/brightness_column"
++                layout="@layout/ridi_frontlight_column"
++                android:layout_width="0dp"
++                android:layout_height="match_parent"
++                android:layout_weight="1" />
++
++            <View
++                android:layout_width="1dp"
++                android:layout_height="match_parent"
++                android:background="#ff000000" />
++
++            <include
++                android:id="@+id/temperature_column"
++                layout="@layout/ridi_frontlight_column"
++                android:layout_width="0dp"
++                android:layout_height="match_parent"
++                android:layout_weight="1" />
++        </LinearLayout>
++    </LinearLayout>
++</FrameLayout>
+diff --git a/packages/apps/Settings/res/layout/ridi_reader_settings.xml b/packages/apps/Settings/res/layout/ridi_reader_settings.xml
+new file mode 100644
+index 0000000..25625f5
+--- /dev/null
++++ b/packages/apps/Settings/res/layout/ridi_reader_settings.xml
+@@ -0,0 +1,99 @@
++<?xml version="1.0" encoding="utf-8"?>
++<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:background="#ffffffff"
++    android:foregroundGravity="center">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:background="#ffffffff"
++        android:orientation="vertical">
++
++        <!-- Stock PanelTitleView: 48dp, white, 40dp icon and 18sp title. -->
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="@dimen/ridi_title_height"
++            android:gravity="center_vertical"
++            android:orientation="horizontal"
++            android:paddingStart="4dp"
++            android:paddingEnd="8dp">
++
++            <ImageView
++                android:layout_width="40dp"
++                android:layout_height="40dp"
++                android:contentDescription="@null"
++                android:src="@drawable/ridi_panel_icon_settings" />
++
++            <TextView
++                android:layout_width="0dp"
++                android:layout_height="match_parent"
++                android:layout_weight="1"
++                android:drawablePadding="7dp"
++                android:gravity="center_vertical"
++                android:text="@string/ridi_reader_settings_title"
++                android:textColor="#ff000000"
++                android:textSize="18sp"
++                android:textStyle="bold" />
++        </LinearLayout>
++
++        <FrameLayout
++            android:layout_width="match_parent"
++            android:layout_height="@dimen/ridi_tab_height"
++            android:layout_marginBottom="4dp">
++
++            <LinearLayout
++                android:layout_width="match_parent"
++                android:layout_height="match_parent"
++                android:baselineAligned="false"
++                android:orientation="horizontal"
++                android:paddingStart="12dp"
++                android:paddingEnd="12dp">
++
++                <TextView
++                    android:id="@+id/tab_display"
++                    style="@style/RidiReaderTab"
++                    android:background="@drawable/ridi_tab_selected"
++                    android:text="@string/ridi_tab_display" />
++
++                <TextView
++                    android:id="@+id/tab_network"
++                    style="@style/RidiReaderTab"
++                    android:text="@string/ridi_tab_network" />
++
++                <TextView
++                    android:id="@+id/tab_apps"
++                    style="@style/RidiReaderTab"
++                    android:text="@string/ridi_tab_apps" />
++
++                <TextView
++                    android:id="@+id/tab_device"
++                    style="@style/RidiReaderTab"
++                    android:text="@string/ridi_tab_device" />
++            </LinearLayout>
++
++            <View
++                android:layout_width="match_parent"
++                android:layout_height="1dp"
++                android:layout_gravity="bottom"
++                android:background="#ff000000" />
++        </FrameLayout>
++
++        <ListView
++            android:id="@+id/settings_list"
++            android:layout_width="match_parent"
++            android:layout_height="0dp"
++            android:layout_weight="1"
++            android:animationCache="false"
++            android:cacheColorHint="#ffffffff"
++            android:divider="@drawable/ridi_row_divider"
++            android:dividerHeight="1dp"
++            android:drawSelectorOnTop="false"
++            android:fastScrollEnabled="false"
++            android:listSelector="@android:color/transparent"
++            android:overScrollMode="never"
++            android:scrollbars="none"
++            android:scrollingCache="false" />
++    </LinearLayout>
++</FrameLayout>
+diff --git a/packages/apps/Settings/res/layout/ridi_setting_row.xml b/packages/apps/Settings/res/layout/ridi_setting_row.xml
+new file mode 100644
+index 0000000..8d631f1
+--- /dev/null
++++ b/packages/apps/Settings/res/layout/ridi_setting_row.xml
+@@ -0,0 +1,53 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="@dimen/ridi_setting_row_height"
++    android:background="@drawable/ridi_row_background"
++    android:clickable="true"
++    android:focusable="true"
++    android:gravity="center_vertical"
++    android:orientation="horizontal"
++    android:paddingStart="@dimen/ridi_setting_horizontal_padding"
++    android:paddingEnd="@dimen/ridi_setting_horizontal_padding">
++
++    <ImageView
++        android:id="@+id/icon"
++        android:layout_width="@dimen/ridi_setting_icon_size"
++        android:layout_height="@dimen/ridi_setting_icon_size"
++        android:layout_marginEnd="12dp"
++        android:contentDescription="@null"
++        android:scaleType="centerInside" />
++
++    <LinearLayout
++        android:layout_width="0dp"
++        android:layout_height="wrap_content"
++        android:layout_weight="1"
++        android:orientation="vertical">
++
++        <TextView
++            android:id="@+id/title"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:includeFontPadding="false"
++            android:textColor="#ff000000"
++            android:textSize="@dimen/ridi_primary_text_size"
++            android:textStyle="bold" />
++
++        <TextView
++            android:id="@+id/summary"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:includeFontPadding="false"
++            android:maxLines="1"
++            android:textColor="#ff666666"
++            android:textSize="@dimen/ridi_secondary_text_size" />
++    </LinearLayout>
++
++    <TextView
++        android:layout_width="26dp"
++        android:layout_height="match_parent"
++        android:gravity="center"
++        android:text="›"
++        android:textColor="#ff666666"
++        android:textSize="24sp" />
++</LinearLayout>
+diff --git a/packages/apps/Settings/res/layout/ridi_wifi_settings.xml b/packages/apps/Settings/res/layout/ridi_wifi_settings.xml
+new file mode 100644
+index 0000000..290588b
+--- /dev/null
++++ b/packages/apps/Settings/res/layout/ridi_wifi_settings.xml
+@@ -0,0 +1,109 @@
++<?xml version="1.0" encoding="utf-8"?>
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:background="#ffffffff"
++    android:orientation="vertical">
++
++    <TextView
++        android:id="@+id/wifi_back"
++        android:layout_width="match_parent"
++        android:layout_height="@dimen/ridi_title_height"
++        android:background="@drawable/ridi_row_background"
++        android:drawableStart="@drawable/ridi_panel_back"
++        android:drawablePadding="7dp"
++        android:gravity="center_vertical"
++        android:paddingStart="5dp"
++        android:text="Wi-Fi"
++        android:textColor="#ff000000"
++        android:textSize="18sp"
++        android:textStyle="bold" />
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="64dp"
++        android:background="@drawable/ridi_row_background"
++        android:gravity="center_vertical"
++        android:orientation="horizontal"
++        android:paddingStart="18dp"
++        android:paddingEnd="18dp">
++
++        <ImageView
++            android:layout_width="34dp"
++            android:layout_height="34dp"
++            android:contentDescription="@null"
++            android:src="@drawable/ridi_icon_wifi" />
++
++        <TextView
++            android:id="@+id/wifi_state"
++            android:layout_width="0dp"
++            android:layout_height="match_parent"
++            android:layout_marginStart="14dp"
++            android:layout_weight="1"
++            android:gravity="center_vertical"
++            android:text="Wi-Fi 상태 확인 중"
++            android:textColor="#ff000000"
++            android:textSize="17sp"
++            android:textStyle="bold" />
++
++        <TextView
++            android:id="@+id/wifi_toggle"
++            android:layout_width="92dp"
++            android:layout_height="44dp"
++            android:background="@drawable/ridi_brightness_button"
++            android:gravity="center"
++            android:text="켜기"
++            android:textColor="#ff000000"
++            android:textSize="16sp"
++            android:textStyle="bold" />
++    </LinearLayout>
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="52dp"
++        android:background="@drawable/ridi_row_background"
++        android:gravity="center_vertical"
++        android:orientation="horizontal"
++        android:paddingStart="18dp"
++        android:paddingEnd="18dp">
++
++        <TextView
++            android:id="@+id/wifi_list_title"
++            android:layout_width="0dp"
++            android:layout_height="match_parent"
++            android:layout_weight="1"
++            android:gravity="center_vertical"
++            android:text="사용 가능한 네트워크"
++            android:textColor="#ff000000"
++            android:textSize="16sp" />
++
++        <TextView
++            android:id="@+id/wifi_refresh"
++            android:layout_width="92dp"
++            android:layout_height="40dp"
++            android:background="@drawable/ridi_brightness_button"
++            android:gravity="center"
++            android:text="새로고침"
++            android:textColor="#ff000000"
++            android:textSize="14sp" />
++    </LinearLayout>
++
++    <View
++        android:layout_width="match_parent"
++        android:layout_height="1dp"
++        android:background="#ff000000" />
++
++    <ListView
++        android:id="@+id/wifi_network_list"
++        android:layout_width="match_parent"
++        android:layout_height="0dp"
++        android:layout_weight="1"
++        android:animationCache="false"
++        android:cacheColorHint="#ffffffff"
++        android:divider="@drawable/ridi_row_divider"
++        android:dividerHeight="1dp"
++        android:listSelector="@android:color/transparent"
++        android:overScrollMode="never"
++        android:scrollbars="none"
++        android:scrollingCache="false" />
++</LinearLayout>
+diff --git a/packages/apps/Settings/res/values/ridi_reader_dimens.xml b/packages/apps/Settings/res/values/ridi_reader_dimens.xml
+new file mode 100644
+index 0000000..26f9a3c
+--- /dev/null
++++ b/packages/apps/Settings/res/values/ridi_reader_dimens.xml
+@@ -0,0 +1,13 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <!-- Recovered from com.ridi.paper's RidiMainSettingsPanel resources. -->
++    <dimen name="ridi_settings_panel_width">510dp</dimen>
++    <dimen name="ridi_settings_panel_height">685dp</dimen>
++    <dimen name="ridi_title_height">48dp</dimen>
++    <dimen name="ridi_tab_height">40dp</dimen>
++    <dimen name="ridi_setting_row_height">52dp</dimen>
++    <dimen name="ridi_setting_icon_size">26dp</dimen>
++    <dimen name="ridi_setting_horizontal_padding">16dp</dimen>
++    <dimen name="ridi_primary_text_size">17sp</dimen>
++    <dimen name="ridi_secondary_text_size">13sp</dimen>
++</resources>
+diff --git a/packages/apps/Settings/res/values/ridi_reader_strings.xml b/packages/apps/Settings/res/values/ridi_reader_strings.xml
+new file mode 100644
+index 0000000..90e4726
+--- /dev/null
++++ b/packages/apps/Settings/res/values/ridi_reader_strings.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <string name="ridi_reader_settings_title">설정</string>
++    <string name="ridi_tab_display">화면 및 조명</string>
++    <string name="ridi_tab_network">네트워크</string>
++    <string name="ridi_tab_apps">앱 및 저장소</string>
++    <string name="ridi_tab_device">기기</string>
++    <string name="ridi_frontlight">프론트라이트</string>
++    <string name="ridi_frontlight_title_back">‹  프론트라이트</string>
++    <string name="ridi_frontlight_summary">밝기 및 색온도 조절</string>
++    <string name="ridi_eink_refresh">화면 갱신</string>
++    <string name="ridi_eink_refresh_summary">자동 · 10페이지마다 전체 정리</string>
++    <string name="ridi_sleep_screen">슬립 화면</string>
++    <string name="ridi_screen_timeout">화면 꺼짐 시간</string>
++    <string name="ridi_full_refresh_now">지금 전체 새로고침</string>
++    <string name="ridi_full_refresh_summary">패널 잔상을 즉시 정리합니다</string>
++    <string name="ridi_brightness">밝기 조절</string>
++    <string name="ridi_color_temperature">색 온도 조절</string>
++    <string name="ridi_max_brightness">최대 밝기</string>
++    <string name="ridi_min_brightness">최소 밝기</string>
++    <string name="ridi_warm_color">따뜻한 색</string>
++    <string name="ridi_less_warm_color">덜 따뜻한 색</string>
++</resources>
+diff --git a/packages/apps/Settings/res/values/ridi_reader_styles.xml b/packages/apps/Settings/res/values/ridi_reader_styles.xml
+new file mode 100644
+index 0000000..80f095f
+--- /dev/null
++++ b/packages/apps/Settings/res/values/ridi_reader_styles.xml
+@@ -0,0 +1,31 @@
++<?xml version="1.0" encoding="utf-8"?>
++<resources>
++    <color name="ridi_reader_panel_window_background">#ffffffff</color>
++
++    <style name="Theme.Settings.RidiFrontlightPanel"
++        parent="@android:style/Theme.DeviceDefault.Light.Dialog.NoActionBar">
++        <item name="android:windowActionModeOverlay">true</item>
++        <item name="android:windowAnimationStyle">@null</item>
++        <item name="android:windowDisablePreview">true</item>
++        <item name="android:windowBackground">@color/ridi_reader_panel_window_background</item>
++        <item name="android:windowNoTitle">true</item>
++        <item name="android:windowIsFloating">true</item>
++        <item name="android:windowIsTranslucent">false</item>
++        <item name="android:backgroundDimEnabled">false</item>
++        <item name="android:windowElevation">0dp</item>
++        <item name="android:windowContentTransitions">false</item>
++        <item name="android:windowActivityTransitions">false</item>
++        <item name="android:colorAccent">#ff111111</item>
++    </style>
++
++    <style name="RidiReaderTab">
++        <item name="android:layout_width">0dp</item>
++        <item name="android:layout_height">match_parent</item>
++        <item name="android:layout_weight">1</item>
++        <item name="android:background">#ffffffff</item>
++        <item name="android:gravity">center</item>
++        <item name="android:includeFontPadding">false</item>
++        <item name="android:textColor">#ff000000</item>
++        <item name="android:textSize">14sp</item>
++    </style>
++</resources>
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiBarSettings.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiBarSettings.java
+new file mode 100644
+index 0000000..003be02
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiBarSettings.java
+@@ -0,0 +1,40 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.content.ContentResolver;
++import android.provider.Settings;
++
++/**
++ * Settings-side mirror of SystemUI's reader system bar keys.
++ *
++ * Keep the key name and the range in sync with
++ * {@code com.android.systemui.ridi.ReaderBarSettings}.
++ */
++final class RidiBarSettings {
++    static final String NAV_BAR_TIMEOUT = "ridi_nav_bar_timeout_seconds";
++
++    static final int DEFAULT_TIMEOUT_SECONDS = 3;
++    static final int MIN_TIMEOUT_SECONDS = 1;
++    static final int MAX_TIMEOUT_SECONDS = 15;
++
++    static final int[] TIMEOUT_CHOICES_SECONDS = {2, 3, 5, 8, 10, 15};
++
++    private RidiBarSettings() {}
++
++    static int getTimeoutSeconds(ContentResolver resolver) {
++        return clamp(Settings.System.getInt(resolver, NAV_BAR_TIMEOUT,
++                DEFAULT_TIMEOUT_SECONDS));
++    }
++
++    static void setTimeoutSeconds(ContentResolver resolver, int seconds) {
++        Settings.System.putInt(resolver, NAV_BAR_TIMEOUT, clamp(seconds));
++    }
++
++    private static int clamp(int seconds) {
++        return Math.max(MIN_TIMEOUT_SECONDS, Math.min(MAX_TIMEOUT_SECONDS, seconds));
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiEinkRefresh.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiEinkRefresh.java
+new file mode 100644
+index 0000000..ffa39cc
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiEinkRefresh.java
+@@ -0,0 +1,45 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.graphics.Rect;
++import android.view.View;
++
++/** Settings-side use of the stock RIDI/Onyx packed E Ink View ABI. */
++final class RidiEinkRefresh {
++    static final int REAGL_PARTIAL_NOWAIT =
++            View.EINK_WAVEFORM_MODE_REAGL
++                    | View.EINK_UPDATE_MODE_PARTIAL
++                    | View.EINK_WAIT_MODE_NOWAIT;
++
++    private RidiEinkRefresh() {}
++
++    /**
++     * Settings is its own process, so this process-global default covers the
++     * AOSP detail activities launched from the RIDI settings home without
++     * changing the policy of launcher or reader applications.
++     */
++    static void configure(View decorView) {
++        View.setGlobalUpdateMode(REAGL_PARTIAL_NOWAIT);
++        View.setFirstDrawUpdateMode(REAGL_PARTIAL_NOWAIT);
++        decorView.setDefaultUpdateMode(REAGL_PARTIAL_NOWAIT);
++    }
++
++    static void invalidate(View view) {
++        if (view == null) {
++            return;
++        }
++        view.setDefaultUpdateMode(REAGL_PARTIAL_NOWAIT);
++        final int width = view.getWidth();
++        final int height = view.getHeight();
++        if (width > 0 && height > 0) {
++            view.invalidate(new Rect(0, 0, width, height),
++                    REAGL_PARTIAL_NOWAIT);
++        } else {
++            view.invalidate(REAGL_PARTIAL_NOWAIT);
++        }
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightActivity.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightActivity.java
+new file mode 100644
+index 0000000..ac55124
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightActivity.java
+@@ -0,0 +1,181 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.app.Activity;
++import android.os.Bundle;
++import android.util.DisplayMetrics;
++import android.view.View;
++import android.view.WindowManager;
++import android.widget.ImageView;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import com.android.settings.R;
++
++/** Fixed, animation-free frontlight and color-temperature controls. */
++public class RidiFrontlightActivity extends Activity {
++    private static final int BRIGHTNESS_STEP = 5;
++
++    private RidiLevelBar mBrightnessBar;
++    private TextView mBrightnessValue;
++    private RidiLevelBar mColorBar;
++    private TextView mColorValue;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        RidiEinkRefresh.configure(getWindow().getDecorView());
++        setContentView(R.layout.ridi_frontlight_settings);
++
++        final View brightness = findViewById(R.id.brightness_column);
++        final View color = findViewById(R.id.temperature_column);
++        bindBrightnessColumn(brightness);
++        bindColorColumn(color);
++
++        findViewById(R.id.frontlight_back).setOnClickListener(v -> finish());
++        updateValues();
++    }
++
++    @Override
++    protected void onResume() {
++        super.onResume();
++        updateValues();
++        overridePendingTransition(0, 0);
++    }
++
++    @Override
++    protected void onStart() {
++        super.onStart();
++        final DisplayMetrics metrics = new DisplayMetrics();
++        getWindowManager().getDefaultDisplay().getMetrics(metrics);
++        final int panelWidth = Math.min(
++                Math.round(510f * metrics.density),
++                Math.round(metrics.widthPixels * 0.94f));
++        final int panelHeight = Math.min(
++                Math.round(685f * metrics.density),
++                Math.round(metrics.heightPixels * 0.92f));
++        getWindow().setDimAmount(0f);
++        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
++        getWindow().getDecorView().setElevation(0f);
++        getWindow().setLayout(panelWidth, panelHeight);
++    }
++
++    @Override
++    public void finish() {
++        super.finish();
++        overridePendingTransition(0, 0);
++    }
++
++    private void bindBrightnessColumn(View column) {
++        ((TextView) column.findViewById(R.id.control_title))
++                .setText(R.string.ridi_brightness);
++        ((TextView) column.findViewById(R.id.high_label))
++                .setText(R.string.ridi_max_brightness);
++        ((TextView) column.findViewById(R.id.low_label))
++                .setText(R.string.ridi_min_brightness);
++        ((ImageView) column.findViewById(R.id.control_icon))
++                .setImageResource(R.drawable.ridi_frontlight_brightness);
++        mBrightnessBar = column.findViewById(R.id.level_stack);
++        mBrightnessValue = column.findViewById(R.id.level_text);
++
++        column.findViewById(R.id.increase).setOnClickListener(v ->
++                changeBrightness(BRIGHTNESS_STEP));
++        column.findViewById(R.id.decrease).setOnClickListener(v ->
++                changeBrightness(-BRIGHTNESS_STEP));
++        mBrightnessBar.setOnLevelChangeListener(new FrontlightBarListener(true));
++    }
++
++    private void bindColorColumn(View column) {
++        ((TextView) column.findViewById(R.id.control_title))
++                .setText(R.string.ridi_color_temperature);
++        ((TextView) column.findViewById(R.id.high_label))
++                .setText(R.string.ridi_warm_color);
++        ((TextView) column.findViewById(R.id.low_label))
++                .setText(R.string.ridi_less_warm_color);
++        ((ImageView) column.findViewById(R.id.control_icon))
++                .setImageResource(R.drawable.ridi_frontlight_color);
++        mColorBar = column.findViewById(R.id.level_stack);
++        mColorValue = column.findViewById(R.id.level_text);
++
++        column.findViewById(R.id.increase).setOnClickListener(v ->
++                changeColor(1));
++        column.findViewById(R.id.decrease).setOnClickListener(v ->
++                changeColor(-1));
++        mColorBar.setOnLevelChangeListener(new FrontlightBarListener(false));
++    }
++
++    private void changeBrightness(int delta) {
++        if (!RidiFrontlightController.setBrightness(getContentResolver(),
++                RidiFrontlightController.getBrightness() + delta)) {
++            showWriteError();
++        }
++        updateValues();
++    }
++
++    private void changeColor(int delta) {
++        if (!RidiFrontlightController.setColor(getContentResolver(),
++                RidiFrontlightController.getColor() + delta)) {
++            showWriteError();
++        }
++        updateValues();
++    }
++
++    private void updateValues() {
++        if (mBrightnessBar == null || mColorBar == null) {
++            return;
++        }
++        final int brightness = RidiFrontlightController.getBrightness();
++        final int maxBrightness = RidiFrontlightController.getMaxBrightness();
++        mBrightnessBar.setMax(maxBrightness);
++        mBrightnessBar.setLevel(brightness);
++        mBrightnessValue.setText(brightness + " / " + maxBrightness);
++        RidiEinkRefresh.invalidate(mBrightnessBar);
++        RidiEinkRefresh.invalidate(mBrightnessValue);
++
++        final int color = RidiFrontlightController.getColor();
++        final int maxColor = RidiFrontlightController.getMaxColor();
++        mColorBar.setMax(maxColor);
++        mColorBar.setLevel(color);
++        mColorValue.setText(color + " / " + maxColor);
++        RidiEinkRefresh.invalidate(mColorBar);
++        RidiEinkRefresh.invalidate(mColorValue);
++    }
++
++    private void showWriteError() {
++        Toast.makeText(this, "프론트라이트 장치에 쓸 수 없습니다.",
++                Toast.LENGTH_SHORT).show();
++    }
++
++    private final class FrontlightBarListener
++            implements RidiLevelBar.OnLevelChangeListener {
++        private final boolean mBrightness;
++
++        FrontlightBarListener(boolean brightness) {
++            mBrightness = brightness;
++        }
++
++        @Override
++        public void onLevelChanging(RidiLevelBar bar, int level) {
++            final TextView value = mBrightness ? mBrightnessValue : mColorValue;
++            value.setText(level + " / " + bar.getMax());
++            RidiEinkRefresh.invalidate(value);
++        }
++
++        @Override
++        public void onLevelChanged(RidiLevelBar bar, int level) {
++            final boolean success = mBrightness
++                    ? RidiFrontlightController.setBrightness(
++                            getContentResolver(), level)
++                    : RidiFrontlightController.setColor(
++                            getContentResolver(), level);
++            if (!success) {
++                showWriteError();
++            }
++            updateValues();
++        }
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightController.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightController.java
+new file mode 100644
+index 0000000..a2dc037
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightController.java
+@@ -0,0 +1,94 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.content.ContentResolver;
++import android.provider.Settings;
++import android.util.Log;
++
++import java.io.BufferedReader;
++import java.io.FileReader;
++import java.io.FileWriter;
++import java.io.IOException;
++
++/**
++ * Small synchronous controller for the E70Q10 two-channel LM3630A frontlight.
++ *
++ * The kernel owns the brightness/color mixing policy. Settings only writes the
++ * two stable backlight class attributes exposed by the board driver.
++ */
++final class RidiFrontlightController {
++    private static final String TAG = "RidiFrontlight";
++    private static final String BASE = "/sys/class/backlight/lm3630a_led/";
++    private static final String BRIGHTNESS = BASE + "brightness";
++    private static final String MAX_BRIGHTNESS = BASE + "max_brightness";
++    private static final String COLOR = BASE + "color";
++    private static final String MAX_COLOR = BASE + "max_color";
++
++    private static final String SETTING_BRIGHTNESS = "ridi_frontlight_level";
++    private static final String SETTING_COLOR = "ridi_frontlight_color";
++
++    private RidiFrontlightController() {}
++
++    static int getBrightness() {
++        return readInt(BRIGHTNESS, 0);
++    }
++
++    static int getMaxBrightness() {
++        return Math.max(1, readInt(MAX_BRIGHTNESS, 100));
++    }
++
++    static int getColor() {
++        return readInt(COLOR, 0);
++    }
++
++    static int getMaxColor() {
++        return Math.max(1, readInt(MAX_COLOR, 10));
++    }
++
++    static boolean setBrightness(ContentResolver resolver, int requested) {
++        final int value = clamp(requested, 0, getMaxBrightness());
++        if (!writeInt(BRIGHTNESS, value)) {
++            return false;
++        }
++        Settings.System.putInt(resolver, SETTING_BRIGHTNESS, value);
++        return true;
++    }
++
++    static boolean setColor(ContentResolver resolver, int requested) {
++        final int value = clamp(requested, 0, getMaxColor());
++        if (!writeInt(COLOR, value)) {
++            return false;
++        }
++        Settings.System.putInt(resolver, SETTING_COLOR, value);
++        return true;
++    }
++
++    private static int readInt(String path, int fallback) {
++        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
++            return Integer.parseInt(reader.readLine().trim());
++        } catch (IOException | NumberFormatException e) {
++            Log.w(TAG, "Cannot read " + path, e);
++            return fallback;
++        }
++    }
++
++    private static boolean writeInt(String path, int value) {
++        try (FileWriter writer = new FileWriter(path, false)) {
++            writer.write(Integer.toString(value));
++            writer.write('\n');
++            writer.flush();
++            return true;
++        } catch (IOException e) {
++            Log.e(TAG, "Cannot write " + path, e);
++            return false;
++        }
++    }
++
++    private static int clamp(int value, int min, int max) {
++        return Math.max(min, Math.min(max, value));
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightProvider.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightProvider.java
+new file mode 100644
+index 0000000..971b286
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiFrontlightProvider.java
+@@ -0,0 +1,88 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.content.ContentProvider;
++import android.content.ContentValues;
++import android.database.Cursor;
++import android.net.Uri;
++import android.os.Bundle;
++
++/**
++ * Narrow privileged bridge used by platform SystemUI.
++ *
++ * Settings runs as android.uid.system and is the only UI process allowed to
++ * write the LM3630A sysfs attributes. The provider is protected by the
++ * signature STATUS_BAR_SERVICE permission; arbitrary applications cannot use
++ * it as a frontlight control endpoint.
++ */
++public final class RidiFrontlightProvider extends ContentProvider {
++    public static final String METHOD_GET_STATE = "get_state";
++    public static final String METHOD_SET_BRIGHTNESS = "set_brightness";
++    public static final String METHOD_SET_COLOR = "set_color";
++
++    public static final String KEY_VALUE = "value";
++    public static final String KEY_SUCCESS = "success";
++    public static final String KEY_BRIGHTNESS = "brightness";
++    public static final String KEY_MAX_BRIGHTNESS = "max_brightness";
++    public static final String KEY_COLOR = "color";
++    public static final String KEY_MAX_COLOR = "max_color";
++
++    @Override
++    public boolean onCreate() {
++        return true;
++    }
++
++    @Override
++    public Bundle call(String method, String arg, Bundle extras) {
++        boolean success = true;
++        final int value = extras != null ? extras.getInt(KEY_VALUE) : 0;
++        if (METHOD_SET_BRIGHTNESS.equals(method)) {
++            success = RidiFrontlightController.setBrightness(
++                    getContext().getContentResolver(), value);
++        } else if (METHOD_SET_COLOR.equals(method)) {
++            success = RidiFrontlightController.setColor(
++                    getContext().getContentResolver(), value);
++        } else if (!METHOD_GET_STATE.equals(method)) {
++            throw new IllegalArgumentException("Unknown method: " + method);
++        }
++
++        final Bundle result = new Bundle();
++        result.putBoolean(KEY_SUCCESS, success);
++        result.putInt(KEY_BRIGHTNESS, RidiFrontlightController.getBrightness());
++        result.putInt(KEY_MAX_BRIGHTNESS, RidiFrontlightController.getMaxBrightness());
++        result.putInt(KEY_COLOR, RidiFrontlightController.getColor());
++        result.putInt(KEY_MAX_COLOR, RidiFrontlightController.getMaxColor());
++        return result;
++    }
++
++    @Override
++    public Cursor query(Uri uri, String[] projection, String selection,
++            String[] selectionArgs, String sortOrder) {
++        return null;
++    }
++
++    @Override
++    public String getType(Uri uri) {
++        return null;
++    }
++
++    @Override
++    public Uri insert(Uri uri, ContentValues values) {
++        throw new UnsupportedOperationException();
++    }
++
++    @Override
++    public int delete(Uri uri, String selection, String[] selectionArgs) {
++        throw new UnsupportedOperationException();
++    }
++
++    @Override
++    public int update(Uri uri, ContentValues values, String selection,
++            String[] selectionArgs) {
++        throw new UnsupportedOperationException();
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiLevelBar.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiLevelBar.java
+new file mode 100644
+index 0000000..68cdcec
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiLevelBar.java
+@@ -0,0 +1,160 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.content.Context;
++import android.graphics.Canvas;
++import android.graphics.Paint;
++import android.util.AttributeSet;
++import android.view.MotionEvent;
++import android.view.View;
++
++/**
++ * Vertical segmented level indicator that is also the control surface.
++ *
++ * The stock reader shows the frontlight level as a stack of segments and lets
++ * the user drag that stack directly, so no separate slider is needed. Segment
++ * changes are reported while dragging and the final value is reported once on
++ * release, which keeps the number of E Ink updates low.
++ */
++public final class RidiLevelBar extends View {
++    /** Reports level changes coming from touch. */
++    public interface OnLevelChangeListener {
++        /** Called for every segment change while the user drags. */
++        void onLevelChanging(RidiLevelBar bar, int level);
++
++        /** Called once when the user lifts the finger. */
++        void onLevelChanged(RidiLevelBar bar, int level);
++    }
++
++    private static final int SEGMENTS = 12;
++    private static final int COLOR_ON = 0xff000000;
++    private static final int COLOR_OFF = 0xffcccccc;
++
++    private final Paint mPaint = new Paint();
++    private final float mGap;
++
++    private int mMax = 100;
++    private int mLevel;
++    private boolean mDragging;
++    private OnLevelChangeListener mListener;
++
++    public RidiLevelBar(Context context) {
++        this(context, null);
++    }
++
++    public RidiLevelBar(Context context, AttributeSet attrs) {
++        super(context, attrs);
++        mPaint.setStyle(Paint.Style.FILL);
++        mGap = Math.max(1f, getResources().getDisplayMetrics().density * 3f);
++        setClickable(true);
++        setFocusable(true);
++    }
++
++    public void setOnLevelChangeListener(OnLevelChangeListener listener) {
++        mListener = listener;
++    }
++
++    public void setMax(int max) {
++        final int safeMax = Math.max(1, max);
++        if (safeMax == mMax) {
++            return;
++        }
++        mMax = safeMax;
++        setLevelInternal(mLevel, false);
++    }
++
++    public int getMax() {
++        return mMax;
++    }
++
++    public int getLevel() {
++        return mLevel;
++    }
++
++    /** Applies a level that did not come from touch. */
++    public void setLevel(int level) {
++        setLevelInternal(level, false);
++    }
++
++    private void setLevelInternal(int level, boolean fromUser) {
++        final int clamped = Math.max(0, Math.min(mMax, level));
++        if (clamped == mLevel) {
++            return;
++        }
++        mLevel = clamped;
++        RidiEinkRefresh.invalidate(this);
++        if (fromUser && mListener != null) {
++            mListener.onLevelChanging(this, mLevel);
++        }
++    }
++
++    @Override
++    public boolean onTouchEvent(MotionEvent event) {
++        if (!isEnabled()) {
++            return false;
++        }
++        switch (event.getActionMasked()) {
++            case MotionEvent.ACTION_DOWN:
++                mDragging = true;
++                getParent().requestDisallowInterceptTouchEvent(true);
++                setLevelInternal(levelForY(event.getY()), true);
++                return true;
++            case MotionEvent.ACTION_MOVE:
++                if (mDragging) {
++                    setLevelInternal(levelForY(event.getY()), true);
++                }
++                return true;
++            case MotionEvent.ACTION_UP:
++                if (mDragging) {
++                    mDragging = false;
++                    setLevelInternal(levelForY(event.getY()), true);
++                    if (mListener != null) {
++                        mListener.onLevelChanged(this, mLevel);
++                    }
++                }
++                return true;
++            case MotionEvent.ACTION_CANCEL:
++                mDragging = false;
++                return true;
++            default:
++                return super.onTouchEvent(event);
++        }
++    }
++
++    /** Top of the view is the maximum level, matching the stock stack. */
++    private int levelForY(float y) {
++        final int usable = getHeight() - getPaddingTop() - getPaddingBottom();
++        if (usable <= 0) {
++            return mLevel;
++        }
++        final float offset = y - getPaddingTop();
++        final float fraction = 1f - (offset / usable);
++        final float clamped = Math.max(0f, Math.min(1f, fraction));
++        return Math.round(clamped * mMax);
++    }
++
++    @Override
++    protected void onDraw(Canvas canvas) {
++        final int width = getWidth() - getPaddingLeft() - getPaddingRight();
++        final int height = getHeight() - getPaddingTop() - getPaddingBottom();
++        if (width <= 0 || height <= 0) {
++            return;
++        }
++        final float segmentHeight = (height - mGap * (SEGMENTS - 1)) / SEGMENTS;
++        if (segmentHeight <= 0f) {
++            return;
++        }
++        final int active = Math.round(SEGMENTS * mLevel / (float) mMax);
++        final float left = getPaddingLeft();
++        final float right = left + width;
++        for (int i = 0; i < SEGMENTS; i++) {
++            final float top = getPaddingTop() + i * (segmentHeight + mGap);
++            mPaint.setColor(i >= SEGMENTS - active ? COLOR_ON : COLOR_OFF);
++            canvas.drawRect(left, top, right, top + segmentHeight, mPaint);
++        }
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiReaderSettingsActivity.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiReaderSettingsActivity.java
+new file mode 100644
+index 0000000..c99b715
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiReaderSettingsActivity.java
+@@ -0,0 +1,413 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.app.Activity;
++import android.app.AlertDialog;
++import android.content.ComponentName;
++import android.content.ContentResolver;
++import android.content.Intent;
++import android.os.Bundle;
++import android.os.PowerManager;
++import android.os.SystemProperties;
++import android.provider.Settings;
++import android.text.format.DateFormat;
++import android.view.LayoutInflater;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.ArrayAdapter;
++import android.widget.ImageView;
++import android.widget.ListView;
++import android.widget.TextView;
++
++import com.android.settings.R;
++
++/** E70Q10's static reader-oriented replacement for the generic Settings home. */
++public class RidiReaderSettingsActivity extends Activity {
++    private static final int TAB_DISPLAY = 0;
++    private static final int TAB_NETWORK = 1;
++    private static final int TAB_APPS = 2;
++    private static final int TAB_DEVICE = 3;
++
++    private ListView mList;
++    private TextView[] mTabs;
++    private ItemAdapter mAdapter;
++    private int mCurrentTab = TAB_DISPLAY;
++    private boolean mHasResumed;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        RidiEinkRefresh.configure(getWindow().getDecorView());
++        setContentView(R.layout.ridi_reader_settings);
++        initBatteryPercentDefault();
++
++        mList = findViewById(R.id.settings_list);
++        mTabs = new TextView[] {
++                findViewById(R.id.tab_display),
++                findViewById(R.id.tab_network),
++                findViewById(R.id.tab_apps),
++                findViewById(R.id.tab_device)
++        };
++        for (int i = 0; i < mTabs.length; i++) {
++            final int tab = i;
++            mTabs[i].setOnClickListener(v -> showTab(tab));
++        }
++        showTab(TAB_DISPLAY);
++    }
++
++    @Override
++    protected void onResume() {
++        super.onResume();
++        overridePendingTransition(0, 0);
++        if (mHasResumed && mAdapter != null) {
++            mAdapter.replace(itemsForTab(mCurrentTab));
++        }
++        mHasResumed = true;
++    }
++
++    @Override
++    public void finish() {
++        super.finish();
++        overridePendingTransition(0, 0);
++    }
++
++    private void showTab(int tab) {
++        mCurrentTab = tab;
++        for (int i = 0; i < mTabs.length; i++) {
++            mTabs[i].setBackgroundResource(i == tab
++                    ? R.drawable.ridi_tab_selected : android.R.color.white);
++        }
++        if (mAdapter == null) {
++            mAdapter = new ItemAdapter(itemsForTab(tab));
++            mList.setAdapter(mAdapter);
++        } else {
++            mAdapter.replace(itemsForTab(tab));
++        }
++        if (mList.getFirstVisiblePosition() != 0) {
++            mList.setSelection(0);
++        }
++        for (TextView tabView : mTabs) {
++            RidiEinkRefresh.invalidate(tabView);
++        }
++        RidiEinkRefresh.invalidate(mList);
++    }
++
++    private Item[] itemsForTab(int tab) {
++        switch (tab) {
++            case TAB_NETWORK:
++                return new Item[] {
++                        item(R.drawable.ridi_icon_wifi, "Wi-Fi",
++                                "무선 네트워크 연결",
++                                () -> startActivity(new Intent(this,
++                                        RidiWifiSettingsActivity.class))),
++                        item(R.drawable.ridi_icon_date, "시간 표시 형식",
++                                timeFormatSummary(), this::pickTimeFormat),
++                        item(R.drawable.ridi_icon_date, "날짜 및 시간",
++                                "표준 시간대와 자동 시간 설정",
++                                () -> launchSettings("com.android.settings.Settings$DateTimeSettingsActivity"))
++                };
++            case TAB_APPS:
++                return new Item[] {
++                        item(R.drawable.ridi_icon_applications, "설치된 앱",
++                                "앱 설치, 삭제 및 권한 관리",
++                                () -> launchSettings("com.android.settings.Settings$ManageApplicationsActivity")),
++                        item(R.drawable.ridi_icon_storage, "저장소",
++                                "내부 저장소와 SD 카드",
++                                () -> launchSettings("com.android.settings.Settings$StorageDashboardActivity")),
++                        item(R.drawable.ridi_icon_notification, "알림",
++                                "앱별 알림 표시 설정",
++                                () -> launchSettings("com.android.settings.Settings$NotificationAppListActivity"))
++                };
++            case TAB_DEVICE:
++                return new Item[] {
++                        item(R.drawable.ridi_icon_battery, "배터리 잔량 숫자",
++                                batteryPercentSummary(), this::toggleBatteryPercent),
++                        item(R.drawable.ridi_icon_device_info, "기기 정보",
++                                "Android 버전과 기기 상태",
++                                () -> launchSettings("com.android.settings.Settings$DeviceInfoSettingsActivity")),
++                        item(R.drawable.ridi_icon_shutdown, "재부팅",
++                                "Android를 안전하게 다시 시작",
++                                this::confirmReboot)
++                };
++            case TAB_DISPLAY:
++            default:
++                return new Item[] {
++                        item(R.drawable.ridi_icon_frontlight, "프론트라이트",
++                                frontlightSummary(),
++                                () -> startActivity(new Intent(this,
++                                        RidiFrontlightActivity.class))),
++                        item(R.drawable.ridi_icon_refresh, "화면 갱신",
++                                "자동 · 변경 영역 부분 갱신",
++                                this::requestFullRefresh),
++                        item(R.drawable.ridi_icon_sleep, "화면 꺼짐 시간",
++                                "절전 전 대기 시간",
++                                () -> launchSettings("com.android.settings.Settings$DisplaySettingsActivity")),
++                        item(R.drawable.ridi_icon_sleep, "내비게이션 바 표시 시간",
++                                navBarTimeoutSummary(), this::pickNavBarTimeout),
++                        item(R.drawable.ridi_icon_sleep, "화면보호기",
++                                screensaverSummary(), this::showScreensaverOptions),
++                        item(R.drawable.ridi_icon_refresh, "지금 전체 새로고침",
++                                "패널 잔상을 GC16으로 정리",
++                                this::requestFullRefresh)
++                };
++        }
++    }
++
++    private Item item(int icon, String title, String summary, Runnable action) {
++        return new Item(icon, title, summary, action);
++    }
++
++    private void launchSettings(String className) {
++        final Intent intent = new Intent();
++        intent.setComponent(new ComponentName(getPackageName(), className));
++        startActivity(intent);
++        overridePendingTransition(0, 0);
++    }
++
++    private String frontlightSummary() {
++        return "밝기 " + RidiFrontlightController.getBrightness()
++                + " · 색온도 " + RidiFrontlightController.getColor();
++    }
++
++    /**
++     * SystemUI's BatteryMeterView only observes
++     * {@link Settings.System#SHOW_BATTERY_PERCENT}, so this toggle has to read
++     * and write that key. The previous private property and "ridi_battery_percent"
++     * key were never read by the status bar, so the switch had no visible effect.
++     */
++    private boolean isBatteryPercentEnabled() {
++        return Settings.System.getInt(getContentResolver(),
++                Settings.System.SHOW_BATTERY_PERCENT, 0) != 0;
++    }
++
++    /**
++     * The platform default for SHOW_BATTERY_PERCENT is off, but this reader
++     * showed the battery text by default. Materialise that default once so the
++     * summary here and the status bar always agree.
++     */
++    private void initBatteryPercentDefault() {
++        if (Settings.System.getString(getContentResolver(),
++                Settings.System.SHOW_BATTERY_PERCENT) == null) {
++            Settings.System.putInt(getContentResolver(),
++                    Settings.System.SHOW_BATTERY_PERCENT, 1);
++        }
++    }
++
++    private String batteryPercentSummary() {
++        return isBatteryPercentEnabled() ? "표시" : "숨김";
++    }
++
++    private void toggleBatteryPercent() {
++        final boolean enabled = !isBatteryPercentEnabled();
++        Settings.System.putInt(getContentResolver(),
++                Settings.System.SHOW_BATTERY_PERCENT, enabled ? 1 : 0);
++        showTab(TAB_DEVICE);
++    }
++
++    /**
++     * The navigation bar is hidden until the user swipes up from the bottom
++     * edge. This picks how long it then stays on screen. SystemUI observes
++     * {@link RidiBarSettings#NAV_BAR_TIMEOUT}, so a change applies immediately.
++     */
++    private String navBarTimeoutSummary() {
++        return "쓸어올린 뒤 "
++                + RidiBarSettings.getTimeoutSeconds(getContentResolver()) + "초간 표시";
++    }
++
++    private void pickNavBarTimeout() {
++        final int[] choices = RidiBarSettings.TIMEOUT_CHOICES_SECONDS;
++        final String[] labels = new String[choices.length];
++        for (int i = 0; i < choices.length; i++) {
++            labels[i] = choices[i] + "초";
++        }
++        final int current = RidiBarSettings.getTimeoutSeconds(getContentResolver());
++        int checked = 0;
++        for (int i = 0; i < choices.length; i++) {
++            if (choices[i] == current) {
++                checked = i;
++                break;
++            }
++        }
++        new AlertDialog.Builder(this)
++                .setTitle("내비게이션 바 표시 시간")
++                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
++                    RidiBarSettings.setTimeoutSeconds(getContentResolver(), choices[which]);
++                    dialog.dismiss();
++                    showTab(TAB_DISPLAY);
++                })
++                .setNegativeButton(android.R.string.cancel, null)
++                .show();
++    }
++
++    /**
++     * Status bar clock format.
++     *
++     * This is the platform's {@link Settings.System#TIME_12_24}, so it also
++     * applies to every app that asks {@code DateFormat.is24HourFormat()}.
++     */
++    private boolean is24HourFormat() {
++        return DateFormat.is24HourFormat(this);
++    }
++
++    private String timeFormatSummary() {
++        return is24HourFormat() ? "24시간" : "오전 / 오후";
++    }
++
++    private void pickTimeFormat() {
++        final String[] labels = {"오전 / 오후 (12시간)", "24시간"};
++        new AlertDialog.Builder(this)
++                .setTitle("시간 표시 형식")
++                .setSingleChoiceItems(labels, is24HourFormat() ? 1 : 0,
++                        (dialog, which) -> {
++                            setTimeFormat(which == 1);
++                            dialog.dismiss();
++                            showTab(TAB_NETWORK);
++                        })
++                .setNegativeButton(android.R.string.cancel, null)
++                .show();
++    }
++
++    /**
++     * Writes the setting and broadcasts the change the same way the AOSP date
++     * and time screen does, so the status bar clock and running apps pick the
++     * new format up immediately.
++     */
++    private void setTimeFormat(boolean is24Hour) {
++        Settings.System.putString(getContentResolver(), Settings.System.TIME_12_24,
++                is24Hour ? "24" : "12");
++
++        final Intent timeChanged = new Intent(Intent.ACTION_TIME_CHANGED);
++        timeChanged.putExtra(Intent.EXTRA_TIME_PREF_24_HOUR_FORMAT,
++                is24Hour ? Intent.EXTRA_TIME_PREF_VALUE_USE_24_HOUR
++                        : Intent.EXTRA_TIME_PREF_VALUE_USE_12_HOUR);
++        sendBroadcast(timeChanged);
++    }
++
++    /**
++     * The panel keeps the suspend image without power, so the screensaver costs
++     * nothing to leave on. These options pick what that still frame shows.
++     */
++    private String screensaverSummary() {
++        final ContentResolver resolver = getContentResolver();
++        if (!RidiScreensaverSettings.isEnabled(resolver)) {
++            return "사용하지 않음";
++        }
++        return RidiScreensaverSettings.styleLabel(resolver)
++                + (RidiScreensaverSettings.showBattery(resolver) ? " · 배터리 표시" : "");
++    }
++
++    private void showScreensaverOptions() {
++        final ContentResolver resolver = getContentResolver();
++        final String[] options = {
++                RidiScreensaverSettings.isEnabled(resolver)
++                        ? "화면보호기 사용 중지" : "화면보호기 사용",
++                "표시 내용: " + RidiScreensaverSettings.styleLabel(resolver),
++                RidiScreensaverSettings.showBattery(resolver)
++                        ? "배터리 표시 끄기" : "배터리 표시 켜기"
++        };
++        new AlertDialog.Builder(this)
++                .setTitle("화면보호기")
++                .setItems(options, (dialog, which) -> {
++                    switch (which) {
++                        case 0:
++                            RidiScreensaverSettings.setEnabled(resolver,
++                                    !RidiScreensaverSettings.isEnabled(resolver));
++                            showTab(TAB_DISPLAY);
++                            break;
++                        case 1:
++                            pickScreensaverStyle();
++                            break;
++                        default:
++                            RidiScreensaverSettings.setShowBattery(resolver,
++                                    !RidiScreensaverSettings.showBattery(resolver));
++                            showTab(TAB_DISPLAY);
++                            break;
++                    }
++                })
++                .setNegativeButton(android.R.string.cancel, null)
++                .show();
++    }
++
++    private void pickScreensaverStyle() {
++        final ContentResolver resolver = getContentResolver();
++        new AlertDialog.Builder(this)
++                .setTitle("표시 내용")
++                .setSingleChoiceItems(RidiScreensaverSettings.STYLE_LABELS,
++                        RidiScreensaverSettings.getStyle(resolver),
++                        (dialog, which) -> {
++                            RidiScreensaverSettings.setStyle(resolver, which);
++                            dialog.dismiss();
++                            showTab(TAB_DISPLAY);
++                        })
++                .setNegativeButton(android.R.string.cancel, null)
++                .show();
++    }
++
++    private void requestFullRefresh() {
++        final int serial = SystemProperties.getInt(
++                "sys.ridi.epd.full_refresh_seq", 0) + 1;
++        SystemProperties.set("sys.ridi.epd.full_refresh_seq",
++                Integer.toString(serial == 0 ? 1 : serial));
++        getWindow().getDecorView().invalidate();
++    }
++
++    private void confirmReboot() {
++        new AlertDialog.Builder(this)
++                .setTitle("재부팅")
++                .setMessage("기기를 다시 시작할까요?")
++                .setNegativeButton(android.R.string.cancel, null)
++                .setPositiveButton("재부팅", (dialog, which) -> {
++                    final PowerManager power = getSystemService(PowerManager.class);
++                    if (power != null) {
++                        power.reboot(null);
++                    }
++                })
++                .show();
++    }
++
++    private static final class Item {
++        final int icon;
++        final String title;
++        final String summary;
++        final Runnable action;
++
++        Item(int icon, String title, String summary, Runnable action) {
++            this.icon = icon;
++            this.title = title;
++            this.summary = summary;
++            this.action = action;
++        }
++    }
++
++    private final class ItemAdapter extends ArrayAdapter<Item> {
++        ItemAdapter(Item[] items) {
++            super(RidiReaderSettingsActivity.this, R.layout.ridi_setting_row);
++            setNotifyOnChange(false);
++            addAll(items);
++        }
++
++        void replace(Item[] items) {
++            setNotifyOnChange(false);
++            clear();
++            addAll(items);
++            notifyDataSetChanged();
++        }
++
++        @Override
++        public View getView(int position, View convertView, ViewGroup parent) {
++            final View row = convertView != null ? convertView
++                    : LayoutInflater.from(getContext()).inflate(
++                            R.layout.ridi_setting_row, parent, false);
++            final Item item = getItem(position);
++            ((ImageView) row.findViewById(R.id.icon)).setImageResource(item.icon);
++            ((TextView) row.findViewById(R.id.title)).setText(item.title);
++            ((TextView) row.findViewById(R.id.summary)).setText(item.summary);
++            row.setOnClickListener(v -> item.action.run());
++            return row;
++        }
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiScreensaverSettings.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiScreensaverSettings.java
+new file mode 100644
+index 0000000..6d29251
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiScreensaverSettings.java
+@@ -0,0 +1,66 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.content.ContentResolver;
++import android.provider.Settings;
++
++/**
++ * Settings-side mirror of SystemUI's reader screensaver keys.
++ *
++ * Keep these in sync with
++ * {@code com.android.systemui.ridi.ReaderScreensaverSettings}.
++ */
++final class RidiScreensaverSettings {
++    static final String ENABLED = "ridi_screensaver_enabled";
++    static final String STYLE = "ridi_screensaver_style";
++    static final String SHOW_CLOCK = "ridi_screensaver_show_clock";
++    static final String SHOW_BATTERY = "ridi_screensaver_show_battery";
++
++    static final int STYLE_BLANK = 0;
++    static final int STYLE_CLOCK = 1;
++    static final int STYLE_KEEP_CONTENT = 2;
++
++    static final int DEFAULT_STYLE = STYLE_CLOCK;
++
++    static final String[] STYLE_LABELS = {
++            "안내 문구만",
++            "시계",
++            "마지막 화면 유지"
++    };
++
++    private RidiScreensaverSettings() {}
++
++    static boolean isEnabled(ContentResolver resolver) {
++        return Settings.System.getInt(resolver, ENABLED, 1) != 0;
++    }
++
++    static void setEnabled(ContentResolver resolver, boolean enabled) {
++        Settings.System.putInt(resolver, ENABLED, enabled ? 1 : 0);
++    }
++
++    static int getStyle(ContentResolver resolver) {
++        final int style = Settings.System.getInt(resolver, STYLE, DEFAULT_STYLE);
++        return (style < STYLE_BLANK || style > STYLE_KEEP_CONTENT)
++                ? DEFAULT_STYLE : style;
++    }
++
++    static void setStyle(ContentResolver resolver, int style) {
++        Settings.System.putInt(resolver, STYLE, style);
++    }
++
++    static boolean showBattery(ContentResolver resolver) {
++        return Settings.System.getInt(resolver, SHOW_BATTERY, 1) != 0;
++    }
++
++    static void setShowBattery(ContentResolver resolver, boolean show) {
++        Settings.System.putInt(resolver, SHOW_BATTERY, show ? 1 : 0);
++    }
++
++    static String styleLabel(ContentResolver resolver) {
++        return STYLE_LABELS[getStyle(resolver)];
++    }
++}
+diff --git a/packages/apps/Settings/src/com/android/settings/ridi/RidiWifiSettingsActivity.java b/packages/apps/Settings/src/com/android/settings/ridi/RidiWifiSettingsActivity.java
+new file mode 100644
+index 0000000..b8e0c3a
+--- /dev/null
++++ b/packages/apps/Settings/src/com/android/settings/ridi/RidiWifiSettingsActivity.java
+@@ -0,0 +1,404 @@
++/*
++ * Copyright (C) 2026 E70Q10 Android port
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ */
++package com.android.settings.ridi;
++
++import android.app.Activity;
++import android.app.AlertDialog;
++import android.content.BroadcastReceiver;
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.IntentFilter;
++import android.net.wifi.ScanResult;
++import android.net.wifi.WifiConfiguration;
++import android.net.wifi.WifiInfo;
++import android.net.wifi.WifiManager;
++import android.os.Bundle;
++import android.text.InputType;
++import android.view.LayoutInflater;
++import android.view.View;
++import android.view.ViewGroup;
++import android.view.Window;
++import android.view.WindowManager;
++import android.widget.ArrayAdapter;
++import android.widget.EditText;
++import android.widget.ImageView;
++import android.widget.ListView;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import com.android.settings.R;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.Comparator;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++/**
++ * Static RIDI-style Wi-Fi screen backed by Android's normal WifiManager.
++ *
++ * It deliberately omits animated switches, expanding cards and live signal
++ * animations. Enterprise EAP configuration falls back to AOSP's complete
++ * editor; common open/WEP/WPA-PSK networks stay in this reader UI.
++ */
++public final class RidiWifiSettingsActivity extends Activity {
++    private WifiManager mWifi;
++    private TextView mState;
++    private TextView mToggle;
++    private TextView mListTitle;
++    private ListView mList;
++    private NetworkAdapter mAdapter;
++    private boolean mReceiverRegistered;
++
++    private final BroadcastReceiver mReceiver = new BroadcastReceiver() {
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            final String action = intent.getAction();
++            if (WifiManager.WIFI_STATE_CHANGED_ACTION.equals(action)
++                    || WifiManager.SCAN_RESULTS_AVAILABLE_ACTION.equals(action)
++                    || WifiManager.NETWORK_STATE_CHANGED_ACTION.equals(action)) {
++                updateState();
++            }
++        }
++    };
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        RidiEinkRefresh.configure(getWindow().getDecorView());
++        setContentView(R.layout.ridi_wifi_settings);
++
++        mWifi = (WifiManager) getApplicationContext()
++                .getSystemService(Context.WIFI_SERVICE);
++        mState = findViewById(R.id.wifi_state);
++        mToggle = findViewById(R.id.wifi_toggle);
++        mListTitle = findViewById(R.id.wifi_list_title);
++        mList = findViewById(R.id.wifi_network_list);
++        mAdapter = new NetworkAdapter();
++        mList.setAdapter(mAdapter);
++
++        findViewById(R.id.wifi_back).setOnClickListener(v -> finish());
++        mToggle.setOnClickListener(v -> toggleWifi());
++        findViewById(R.id.wifi_refresh).setOnClickListener(v -> requestScan());
++        mList.setOnItemClickListener((parent, view, position, id) ->
++                selectNetwork(mAdapter.getItem(position)));
++    }
++
++    @Override
++    protected void onStart() {
++        super.onStart();
++        if (!mReceiverRegistered) {
++            final IntentFilter filter = new IntentFilter();
++            filter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
++            filter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
++            filter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
++            registerReceiver(mReceiver, filter);
++            mReceiverRegistered = true;
++        }
++        updateState();
++        if (mWifi != null && mWifi.isWifiEnabled()) {
++            requestScan();
++        }
++    }
++
++    @Override
++    protected void onStop() {
++        if (mReceiverRegistered) {
++            unregisterReceiver(mReceiver);
++            mReceiverRegistered = false;
++        }
++        super.onStop();
++    }
++
++    @Override
++    public void finish() {
++        super.finish();
++        overridePendingTransition(0, 0);
++    }
++
++    private void toggleWifi() {
++        if (mWifi == null) {
++            return;
++        }
++        final boolean enable = !mWifi.isWifiEnabled();
++        if (!mWifi.setWifiEnabled(enable)) {
++            Toast.makeText(this, "Wi-Fi 상태를 변경할 수 없습니다.",
++                    Toast.LENGTH_SHORT).show();
++        }
++        mState.setText(enable ? "Wi-Fi 켜는 중" : "Wi-Fi 끄는 중");
++        mToggle.setText(enable ? "끄기" : "켜기");
++        RidiEinkRefresh.invalidate(mState);
++        RidiEinkRefresh.invalidate(mToggle);
++    }
++
++    private void requestScan() {
++        if (mWifi == null || !mWifi.isWifiEnabled()) {
++            updateState();
++            return;
++        }
++        mListTitle.setText("네트워크 검색 중");
++        RidiEinkRefresh.invalidate(mListTitle);
++        if (!mWifi.startScan()) {
++            mListTitle.setText("검색 요청 실패");
++            RidiEinkRefresh.invalidate(mListTitle);
++        }
++    }
++
++    private void updateState() {
++        if (mWifi == null) {
++            mState.setText("Wi-Fi를 사용할 수 없음");
++            mToggle.setText("켜기");
++            replaceNetworks(Collections.emptyList());
++            return;
++        }
++
++        switch (mWifi.getWifiState()) {
++            case WifiManager.WIFI_STATE_ENABLED:
++                mState.setText(connectedSsid());
++                mToggle.setText("끄기");
++                replaceNetworks(readNetworks());
++                break;
++            case WifiManager.WIFI_STATE_ENABLING:
++                mState.setText("Wi-Fi 켜는 중");
++                mToggle.setText("끄기");
++                break;
++            case WifiManager.WIFI_STATE_DISABLING:
++                mState.setText("Wi-Fi 끄는 중");
++                mToggle.setText("켜기");
++                break;
++            case WifiManager.WIFI_STATE_DISABLED:
++                mState.setText("Wi-Fi 꺼짐");
++                mToggle.setText("켜기");
++                replaceNetworks(Collections.emptyList());
++                break;
++            default:
++                mState.setText("Wi-Fi 준비 중");
++                mToggle.setText("켜기");
++                break;
++        }
++        RidiEinkRefresh.invalidate(mState);
++        RidiEinkRefresh.invalidate(mToggle);
++    }
++
++    private String connectedSsid() {
++        final WifiInfo info = mWifi.getConnectionInfo();
++        if (info == null || info.getNetworkId() < 0) {
++            return "Wi-Fi 켜짐";
++        }
++        return "연결됨 · " + unquote(info.getSSID());
++    }
++
++    private List<Network> readNetworks() {
++        final Map<String, ScanResult> strongest = new HashMap<>();
++        final List<ScanResult> results = mWifi.getScanResults();
++        if (results != null) {
++            for (ScanResult result : results) {
++                if (result == null || result.SSID == null || result.SSID.isEmpty()) {
++                    continue;
++                }
++                final ScanResult old = strongest.get(result.SSID);
++                if (old == null || result.level > old.level) {
++                    strongest.put(result.SSID, result);
++                }
++            }
++        }
++
++        final Map<String, Integer> saved = new HashMap<>();
++        final List<WifiConfiguration> configurations = mWifi.getConfiguredNetworks();
++        if (configurations != null) {
++            for (WifiConfiguration configuration : configurations) {
++                saved.put(unquote(configuration.SSID), configuration.networkId);
++            }
++        }
++
++        final WifiInfo info = mWifi.getConnectionInfo();
++        final String connected = info != null ? unquote(info.getSSID()) : "";
++        final List<Network> networks = new ArrayList<>();
++        for (ScanResult result : strongest.values()) {
++            networks.add(new Network(result, saved.get(result.SSID),
++                    result.SSID.equals(connected)));
++        }
++        Collections.sort(networks, Comparator
++                .comparing((Network network) -> !network.connected)
++                .thenComparing((Network network) -> -network.result.level)
++                .thenComparing(network -> network.result.SSID));
++        return networks;
++    }
++
++    private void replaceNetworks(List<Network> networks) {
++        mAdapter.replace(networks);
++        mListTitle.setText(networks.isEmpty()
++                ? (mWifi != null && mWifi.isWifiEnabled()
++                        ? "검색된 네트워크 없음" : "사용 가능한 네트워크")
++                : "사용 가능한 네트워크 · " + networks.size());
++        RidiEinkRefresh.invalidate(mListTitle);
++        RidiEinkRefresh.invalidate(mList);
++    }
++
++    private void selectNetwork(Network network) {
++        if (network == null) {
++            return;
++        }
++        if (network.networkId != null) {
++            connect(network.networkId);
++            return;
++        }
++        final String capabilities = network.result.capabilities != null
++                ? network.result.capabilities : "";
++        if (capabilities.contains("EAP")) {
++            openAospWifiSettings();
++        } else if (capabilities.contains("WEP") || capabilities.contains("PSK")) {
++            showPasswordDialog(network);
++        } else {
++            connectNew(network, null);
++        }
++    }
++
++    private void showPasswordDialog(Network network) {
++        final EditText password = new EditText(this);
++        password.setSingleLine(true);
++        password.setHint("비밀번호");
++        password.setInputType(InputType.TYPE_CLASS_TEXT
++                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
++        password.setPadding(24, 12, 24, 12);
++
++        final AlertDialog dialog = new AlertDialog.Builder(this)
++                .setTitle(network.result.SSID)
++                .setView(password)
++                .setNegativeButton(android.R.string.cancel, null)
++                .setPositiveButton("연결", (ignored, which) ->
++                        connectNew(network, password.getText().toString()))
++                .create();
++        dialog.setOnShowListener(ignored -> makeWindowEinkSafe(dialog.getWindow()));
++        dialog.show();
++    }
++
++    private void connectNew(Network network, String password) {
++        final WifiConfiguration configuration = new WifiConfiguration();
++        configuration.SSID = quote(network.result.SSID);
++        final String capabilities = network.result.capabilities != null
++                ? network.result.capabilities : "";
++        if (capabilities.contains("WEP")) {
++            configuration.wepKeys[0] = quote(password);
++            configuration.wepTxKeyIndex = 0;
++            configuration.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE);
++            configuration.allowedAuthAlgorithms.set(WifiConfiguration.AuthAlgorithm.OPEN);
++            configuration.allowedAuthAlgorithms.set(WifiConfiguration.AuthAlgorithm.SHARED);
++        } else if (capabilities.contains("PSK")) {
++            configuration.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK);
++            configuration.preSharedKey = password != null
++                    && password.matches("[0-9A-Fa-f]{64}") ? password : quote(password);
++        } else {
++            configuration.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE);
++        }
++        final int networkId = mWifi.addNetwork(configuration);
++        if (networkId < 0) {
++            Toast.makeText(this, "네트워크를 저장할 수 없습니다.",
++                    Toast.LENGTH_SHORT).show();
++            return;
++        }
++        connect(networkId);
++    }
++
++    private void connect(int networkId) {
++        if (!mWifi.enableNetwork(networkId, true) || !mWifi.reconnect()) {
++            Toast.makeText(this, "네트워크 연결을 시작할 수 없습니다.",
++                    Toast.LENGTH_SHORT).show();
++            return;
++        }
++        mState.setText("연결 중");
++        RidiEinkRefresh.invalidate(mState);
++    }
++
++    private void openAospWifiSettings() {
++        final Intent intent = new Intent();
++        intent.setComponent(new ComponentName(getPackageName(),
++                "com.android.settings.Settings$WifiSettingsActivity"));
++        startActivity(intent);
++        overridePendingTransition(0, 0);
++    }
++
++    private void makeWindowEinkSafe(Window window) {
++        if (window == null) {
++            return;
++        }
++        window.setWindowAnimations(0);
++        window.setDimAmount(0f);
++        window.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
++        window.getDecorView().setElevation(0f);
++        RidiEinkRefresh.configure(window.getDecorView());
++    }
++
++    private static String quote(String value) {
++        final String safe = value == null ? "" : value
++                .replace("\\", "\\\\").replace("\"", "\\\"");
++        return '"' + safe + '"';
++    }
++
++    private static String unquote(String value) {
++        if (value == null) {
++            return "";
++        }
++        return value.length() >= 2 && value.charAt(0) == '"'
++                && value.charAt(value.length() - 1) == '"'
++                ? value.substring(1, value.length() - 1) : value;
++    }
++
++    private static final class Network {
++        final ScanResult result;
++        final Integer networkId;
++        final boolean connected;
++
++        Network(ScanResult result, Integer networkId, boolean connected) {
++            this.result = result;
++            this.networkId = networkId;
++            this.connected = connected;
++        }
++    }
++
++    private final class NetworkAdapter extends ArrayAdapter<Network> {
++        NetworkAdapter() {
++            super(RidiWifiSettingsActivity.this, R.layout.ridi_setting_row);
++            setNotifyOnChange(false);
++        }
++
++        void replace(List<Network> networks) {
++            clear();
++            addAll(networks);
++            notifyDataSetChanged();
++        }
++
++        @Override
++        public View getView(int position, View convertView, ViewGroup parent) {
++            final View row = convertView != null ? convertView
++                    : LayoutInflater.from(getContext()).inflate(
++                            R.layout.ridi_setting_row, parent, false);
++            final Network network = getItem(position);
++            ((ImageView) row.findViewById(R.id.icon))
++                    .setImageResource(R.drawable.ridi_icon_wifi);
++            ((TextView) row.findViewById(R.id.title)).setText(network.result.SSID);
++            ((TextView) row.findViewById(R.id.summary)).setText(summary(network));
++            return row;
++        }
++
++        private String summary(Network network) {
++            final int level = WifiManager.calculateSignalLevel(network.result.level, 4);
++            final String security = network.result.capabilities.contains("EAP")
++                    ? "기업용" : network.result.capabilities.contains("PSK")
++                    ? "보안" : network.result.capabilities.contains("WEP")
++                    ? "WEP" : "개방";
++            if (network.connected) {
++                return "연결됨 · 신호 " + (level + 1) + "/4";
++            }
++            if (network.networkId != null) {
++                return "저장됨 · " + security + " · 신호 " + (level + 1) + "/4";
++            }
++            return security + " · 신호 " + (level + 1) + "/4";
++        }
++    }
++}

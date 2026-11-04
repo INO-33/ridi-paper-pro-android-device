@@ -1,10 +1,15 @@
 # E70Q10 Android 8 feature-pruning plan
 
+> This is the detailed pruning checklist. The authoritative execution order is
+> now [`FINAL_PORTING_PLAN.md`](FINAL_PORTING_PLAN.md). The target application
+> is YES24 and the target home application is Total Launcher; the stock RIDI
+> application is reverse-engineering reference only.
+
 ## Goal
 
 Build an Android 8.0 userspace for the RIDI Paper Pro E70Q10 that contains
-only the Android runtime and hardware support required by a dedicated
-e-reader.
+only the Android runtime and hardware support required by YES24 and Total
+Launcher on a dedicated e-reader.
 
 Android 8.0 is the first Android release with Project Treble. The E70Q10 was
 not launched as a Treble device, so full Treble compliance is not a bring-up
@@ -12,8 +17,9 @@ goal. However, the NXP Oreo BSP and SurfaceFlinger still require a minimal
 HIDL/VNDK foundation. Do not remove that foundation merely to reduce image
 size.
 
-The current `e70q10_minimal-eng` product is the first-stage bring-up profile.
-It already omits Wi-Fi, Bluetooth, camera, audio, OMX, GMS and consumer apps.
+The reference product now inherits the E70Q10 positive reader allowlist rather
+than `generic_no_telephony`. The latter still imported phone, Bluetooth, NFC,
+printing, calendar, contacts, mail, music and decorative applications.
 
 ## Hardware-backed functions to retain
 
@@ -49,7 +55,9 @@ graphics path from working:
 - ADB and shell in engineering builds
 - `android.hardware.graphics.allocator@2.0`
 - `android.hardware.graphics.mapper@2.0`
-- `android.hardware.graphics.composer@2.1`
+- `android.hardware.graphics.allocator@2.0` and mapper 2.0 remain for buffer
+  allocation; the selected initial display path uses direct HWC1 and does not
+  package graphics composer 2.1
 - the required HIDL libraries and `vndk-sp`
 - a minimal device VINTF manifest
 
@@ -125,20 +133,20 @@ Do not confuse Android media playback with document rendering. Retain:
 - PDF/EPUB renderer dependencies
 - SurfaceFlinger and the EPDC graphics path
 
-Android DRM/media services and RIDI content protection are also separate.
-Determine the RIDI application's actual DRM dependencies before removing
-framework DRM components.
+Android DRM/media services and YES24 content protection are also separate.
+Determine YES24's actual DRM dependencies before removing framework DRM
+components.
 
-## Stock KitKat application disposition
+## Application disposition
 
 The following classification is based on the extracted stock filesystem.
 
 ### Initial retain candidates
 
-- `com.ridi.paper`
+- YES24 and Total Launcher only after the reference system boots reliably
 - Korean input method
 - Settings and SettingsProvider
-- SystemUI and Keyguard
+- SystemUI and disabled-by-policy Keyguard framework support
 - InputDevices
 - DownloadProvider
 - DocumentsUI
@@ -147,17 +155,19 @@ The following classification is based on the extracted stock filesystem.
 - PackageInstaller
 - CertInstaller
 - Shell in engineering builds only
+- Launcher2 as a recovery HOME until Total Launcher is packaged in `/system`
+- WebView for YES24 login/store flows
+- proxy and captive-portal components until Wi-Fi authentication is validated
 
 ### Removal candidates
 
-- Bluetooth
-- ContactsProvider
-- FusedLocation
-- SharedStorageBackup
-- BackupRestoreConfirmation
+- Bluetooth, NFC, telephony, Telecom and MMS
+- contacts, calendar, email and standalone Browser
+- camera, gallery, music, MusicFX and TTS
+- printing, dreams, wallpapers and Easter egg
+- FusedLocation and ManagedProvisioning
 - PacProcessor when proxy support is not required
 - ProxyHandler when proxy support is not required
-- Browser after WebView use is ruled out
 - Suconfig in production
 - DefaultContainerService after the Oreo package-install path is verified
 
@@ -167,17 +177,20 @@ The following classification is based on the extracted stock filesystem.
 - `MsgE6`
 - `com.wordwebsoftware.android.wordweb`
 
-These proprietary applications may implement frontlight UI, device messages,
-dictionary integration or other reader-specific behaviour. Inspect their
-manifest, native-library dependencies and runtime calls before deciding.
+These stock proprietary applications may document frontlight UI, device
+messages, dictionary integration or other hardware behaviour. They are
+reverse-engineering references, not product dependencies. Inspect their
+manifest, native-library dependencies and runtime calls before reimplementing
+only the required hardware behaviour.
 
 ## WebView decision
 
-WebView is relatively large, but the RIDI application may use it for login,
-payment, notices, dictionary content or book rendering.
+WebView is relatively large, but YES24 may use it for login, payment, notices,
+dictionary content or book rendering.
 
 1. Start with WebView present in the reader profile.
-2. Record RIDI application startup and representative reading workflows.
+2. Record YES24 startup and representative login, download and reading
+   workflows.
 3. Check process, ActivityManager and log output for WebView use.
 4. If unused, remove both Browser and WebView.
 5. If used, retain WebView but remove the standalone Browser application.
@@ -227,7 +240,8 @@ Purpose: functional e-reader validation.
 - Wi-Fi station mode
 - download and external-storage providers
 - Korean input and fonts
-- RIDI application
+- YES24
+- Total Launcher with a fallback HOME activity
 - WebView retained until measured
 - final frontlight and EPDC policy
 - no camera, audio, Bluetooth, cellular, NFC or GMS
@@ -262,7 +276,7 @@ Every optional feature should pass this decision sequence:
 
 1. Is corresponding hardware physically present?
 2. Did the stock reader use the feature rather than merely ship its package?
-3. Does the RIDI reading workflow require it?
+3. Does the measured YES24 or Total Launcher workflow require it?
 4. Does Oreo framework startup require it?
 5. Can its removal be verified with RAM/SD boot before any eMMC write?
 

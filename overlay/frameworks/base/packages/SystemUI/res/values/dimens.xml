@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Larger clock for the reader's status bar. -->
+    <dimen name="status_bar_clock_size">18sp</dimen>
+
+    <!-- Keep the battery percentage the same size as the clock. -->
+    <dimen name="status_bar_battery_percent_size">@dimen/status_bar_clock_size</dimen>
+
+    <!--
+        The stock 4.4.2 battery artwork is a wide 51x24 bitmap, while the drawn
+        Material battery it replaces is a narrow 9.5x14.5dp shape. Keeping the
+        Material box made FIT_CENTER shrink the bitmap to its width, so the icon
+        came out tiny. Use the artwork's own 51:24 ratio, sized to two thirds of
+        the 24dp status bar so it matches the enlarged clock.
+    -->
+    <dimen name="status_bar_battery_icon_height">16dp</dimen>
+    <dimen name="status_bar_battery_icon_width">34dp</dimen>
+
+    <!--
+        Keep the navigation bar the same thickness as stock but make each key
+        wider so the buttons are easier to hit with the transient overlay.
+    -->
+    <dimen name="navigation_key_width">104dp</dimen>
+    <dimen name="navigation_extra_key_width">52dp</dimen>
+    <dimen name="navigation_side_padding">24dp</dimen>
+</resources>

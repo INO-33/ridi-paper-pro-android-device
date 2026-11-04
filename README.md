@@ -1,7 +1,9 @@
 # E70Q10 Android product status
 
 This tree defines a dedicated NXP i.MX6SL product and selects the reconstructed
-E70Q10 DTB. It is a bring-up skeleton, not a flashable product.
+E70Q10 DTB. Android 8 reaches `sys.boot_completed=1` using RAM boot and the
+external-SD system/vendor/data partitions. It remains a recovery-oriented
+bring-up tree, not an eMMC-flashing procedure.
 
 For the first SD/RAM boot, use `e70q10_minimal-eng`. It starts from Android's
 `core_minimal` product instead of the full NXP EVK product and includes only
@@ -11,6 +13,11 @@ disabled until the base userspace reaches `sys.boot_completed`.
 
 See [`FEATURE_PRUNING_PLAN.md`](FEATURE_PRUNING_PLAN.md) for the hardware-based
 package policy and the planned minimal, reader and production product profiles.
+The updated execution order and YES24/Total Launcher target are documented in
+[`FINAL_PORTING_PLAN.md`](FINAL_PORTING_PLAN.md). The verified NXP graphics
+call path is documented in [`GRAPHICS_EPDC_PATH.md`](GRAPHICS_EPDC_PATH.md).
+The first complete reference image hashes and sizes are recorded in
+[`BUILD_RESULTS.md`](BUILD_RESULTS.md).
 
 The minimal fstab refers only to external SD partitions:
 
@@ -21,6 +28,20 @@ The minimal fstab refers only to external SD partitions:
 Internal eMMC (`mmcblk0`) is intentionally absent. The minimal init starts the
 hardware watchdog with a 30-second timeout and the kernel command line requests
 an automatic reboot ten seconds after a panic.
+
+The Android build emits sparse `system.img` and `vendor.img` files. Never write
+those sparse containers directly to the SD partitions with `dd`; the kernel
+cannot mount them as ext4. Convert them first:
+
+```sh
+E70Q10_PRODUCT_OUT=/path/to/out/target/product/e70q10 \
+E70Q10_SD_RAW_OUT=/path/on/build-disk/sd-ready \
+device/ridi/e70q10/tools/prepare_sd_raw_images.sh
+```
+
+Only `system.raw.ext4` and `vendor.raw.ext4` are suitable for direct partition
+writes. Their expected expanded sizes are the configured partition sizes:
+768 MiB and 256 MiB, respectively.
 
 ## Reproduce the minimal build
 
@@ -34,9 +55,36 @@ allow old kernel host tools to build with a modern GCC.
 patch -p1 < device/ridi/e70q10/patches/0001-android8-modern-host-python.patch
 patch -p1 < device/ridi/e70q10/patches/0002-build-without-private-fsl-codec.patch
 patch -p1 < device/ridi/e70q10/patches/0003-kernel-host-fcommon.patch
+patch -p1 < device/ridi/e70q10/patches/0004-surfaceflinger-fix-hwc1-framebuffer-post.patch
+patch -p1 < device/ridi/e70q10/patches/0005-gralloc-log-epdc-update-latency.patch
+patch -p1 < device/ridi/e70q10/patches/0006-documentsui-fix-usb-shortcut-color.patch
+patch -p1 < device/ridi/e70q10/patches/0007-framework-eink-policy.patch
+patch -p1 < device/ridi/e70q10/patches/0008-mesa-android-softpipe.patch
+patch -p1 < device/ridi/e70q10/patches/0009-pixelflinger-clip-raster-bounds.patch
+patch -p1 < device/ridi/e70q10/patches/0010-native-eink-policy-transport.patch
+patch -p1 < device/ridi/e70q10/patches/0011-imx-display-eink-policy.patch
+patch -p1 < device/ridi/e70q10/patches/0012-settings-reader-ui.patch
 device/ridi/e70q10/tools/build_android8.sh check
 device/ridi/e70q10/tools/build_android8.sh build ramdisk
 device/ridi/e70q10/tools/build_android8.sh build bootimage
+E70Q10_RAMBOOT_PROFILE=minimal \
+device/ridi/e70q10/tools/make_stock_ramboot.sh
+```
+
+The build helper separates output by product. After attaching an ext4 build
+disk, use a clean reference output directory:
+
+```sh
+E70Q10_LUNCH=e70q10_reference-eng \
+E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
+device/ridi/e70q10/tools/build_android8.sh build systemimage vendorimage
+```
+
+Build the reference stock-U-Boot RAM-boot candidate from the same output:
+
+```sh
+E70Q10_OUT_DIR=/path/on/ext4/android-out/e70q10_reference \
+E70Q10_RAMBOOT_PROFILE=reference \
 device/ridi/e70q10/tools/make_stock_ramboot.sh
 ```
 
@@ -48,16 +96,36 @@ and the verified diagnostic images use a kernel-appended DTB. Therefore,
 never overwrites the standard build output. Build outputs are deliberately
 excluded from Git.
 
-Blocking work before an image can be installed:
+Graphics backend selection, the AGL/GLES1 recovery path, and the isolated
+Mesa softpipe benchmark procedure are documented in
+[`GRAPHICS_BRINGUP.md`](GRAPHICS_BRINGUP.md).
 
-1. Forward-port Netronix CYTTSP5, LM3630A and RTL8189FS support from
-   `reference-sources/tolino-epos/kernel_imx` to Linux 4.9, and production-harden
-   the already working RC5T619/TPS65185 ports.
-2. The stock waveform, shared ED078KH1/ED078KH3 timing profile, 16-bit EPDC bus
-   and PMIC sequence are hardware-verified with white and 16-step GC16 RAM-boot
-   refreshes. Finish repeated-update, temperature and suspend/resume validation.
-3. Adapt the NXP Oreo composer/gralloc path for EPDC update ioctls and ghosting
-   policy.  KitKat HAL binaries are not ABI-compatible.
-4. Measure built images and define a recoverable replacement partition map.
-5. Prove RAM boot, ADB/serial recovery, suspend/resume and power-off before any
-   eMMC write.
+The reference product uses the positive package allowlist in
+`e70q10_reader_base.mk`. It deliberately avoids `generic_no_telephony`, which
+still pulls phone, Bluetooth, NFC, printing, PIM, music and decoration apps
+into an AOSP Oreo image. Launcher2 remains only as a recovery HOME until Total
+Launcher is packaged as a system application.
+
+This repository is private, so the device-unique blobs the port cannot be
+rebuilt without are committed here:
+
+- `stock-blobs/imx/epdc/epdc_ED078KH1.fw` is the extracted EPDC waveform. The
+  reference product copies it to `/vendor/firmware/imx/epdc/`. Without this
+  file the EPDC driver stays uninitialized and `MXCFB_SEND_UPDATE` returns
+  `EPERM`.
+- `prebuilt/8189fs.ko` is the RTL8189FS Wi-Fi kernel module.
+
+Both are extracted from the device and are not redistributable. Keep this
+repository private, and do not mirror it to a public remote.
+
+Current validation work:
+
+1. Build and deploy the static E Ink framework policy: no starting windows,
+   transitions, recents, lock screen, ripple or animated drawables.
+2. Validate gralloc's changed-region EPDC path: unchanged frames are skipped,
+   small changes use partial AUTO updates, and large or accumulated changes use
+   full GC16 cleanup updates.
+3. Tune partial-update thresholds, temperature handling and suspend/resume.
+4. Bring up RTL8189FS Wi-Fi and finish CYTTSP5 input validation.
+5. Keep all tests on `fastboot boot` plus external SD until recovery and
+   power-management behavior are proven.

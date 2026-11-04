@@ -10,7 +10,9 @@ key 108   DPAD_DOWN
 key 114   VOLUME_DOWN
 key 115   VOLUME_UP
 key 90    BUTTON_B
-key 59    PROG_RED
+# Stock right-side quick button (GPIO3_IO24 / KEY_F1).
+# PhoneWindowManager maps short press to BACK and long press to ReaderQuickPanel.
+key 59    F1
 key 191   PAGE_DOWN
 key 192   PAGE_DOWN
 key 193   PAGE_UP

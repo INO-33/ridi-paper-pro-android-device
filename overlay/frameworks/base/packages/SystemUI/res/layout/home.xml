@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+     Reader override: the bar keeps the stock 48dp thickness, but the icon is
+     allowed to use almost all of it so the button is easier to hit.
+-->
+<com.android.systemui.statusbar.policy.KeyButtonView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:systemui="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/home"
+    android:layout_width="@dimen/navigation_key_width"
+    android:layout_height="match_parent"
+    android:layout_weight="0"
+    systemui:keyCode="3"
+    android:scaleType="fitCenter"
+    android:contentDescription="@string/accessibility_home"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:paddingStart="@dimen/navigation_key_padding"
+    android:paddingEnd="@dimen/navigation_key_padding"
+    />
