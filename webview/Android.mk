@@ -16,5 +16,7 @@ LOCAL_OVERRIDES_PACKAGES := webview
 LOCAL_CERTIFICATE := PRESIGNED
 LOCAL_DEX_PREOPT := false
 LOCAL_SRC_FILES := SystemWebView.apk
+# Preserve the APK v2/v3 signature block: no zip rewriting or realignment.
+LOCAL_REPLACE_PREBUILT_APK_INSTALLED := $(LOCAL_PATH)/SystemWebView.apk
 
 include $(BUILD_PREBUILT)

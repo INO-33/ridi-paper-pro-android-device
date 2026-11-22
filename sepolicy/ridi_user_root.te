@@ -1,0 +1,27 @@
+# /dev/ridi-root/su: symlink to /system/xbin/ridi-su that init.E70Q10.rc creates
+# (root switch on) and removes (off). It cannot be labelled system_file
+# (AOSP neverallow on relabelto), so it gets its own type.
+type ridi_su_link, dev_type;
+allow init device:lnk_file { getattr relabelfrom unlink };
+allow init ridi_su_link:lnk_file { getattr relabelto unlink };
+
+ifelse(target_ridi_user_root, `true', `
+# Resolve /system/xbin/su -> /dev/ridi-root/su -> /system/xbin/ridi-su.
+allow { shell su } su_exec:lnk_file { getattr read };
+# Root shell diagnostics: getenforce and dmesg.
+allow su selinuxfs:file r_file_perms;
+allow su kmsg_device:chr_file r_file_perms;
+# Java tools (pm/cmd/am/settings) start ART, which mprotects its ashmem
+# heap (/dev/ashmem/dalvik-*, tmpfs) and reads the logging property.
+allow su tmpfs:file { read write getattr execute };
+# cmd/pm pass their stdin/stdout/stderr to the system_server shell command.
+allow system_server su:fd use;
+allow system_server su:{ unix_stream_socket fifo_file } { read write getattr };
+allow system_server su:unix_stream_socket getopt;
+# cmd ShellCallback/ResultReceiver: system_server calls back into the tool.
+binder_call(system_server, su)
+# ART tries to write an oat file for the tool; it falls back to running the dex.
+dontaudit su dalvikcache_data_file:dir write;
+get_prop(su, device_logging_prop)
+allow { shell su } ridi_su_link:lnk_file read;
+')

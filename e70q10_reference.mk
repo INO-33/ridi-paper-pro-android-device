@@ -27,7 +27,6 @@ PRODUCT_PACKAGES += libGLES_android
 endif
 
 # Removable, disabled-by-default suspend/battery diagnostic recorder.
-PRODUCT_PACKAGES += e70q10_power_diag
 
 PRODUCT_PACKAGES += \
     e70q10_pxp_bench \
@@ -83,9 +82,6 @@ endif
 $(call inherit-product, device/ridi/e70q10/e70q10_eink_defaults.mk)
 
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
-    ro.secure=0 \
-    ro.adb.secure=0 \
-    ro.debuggable=1 \
     sys.viewroot.hw=false \
     persist.enable_task_snapshots=false \
     persist.sys.usb.config=mtp,adb
@@ -111,4 +107,15 @@ ifeq ($(E70Q10_GRAPHICS_BACKEND),mesa)
 PRODUCT_PROPERTY_OVERRIDES += ro.opengles.version=131072
 else
 PRODUCT_PROPERTY_OVERRIDES += ro.opengles.version=65537
+endif
+
+# Optional root is independent of Android's global debug properties.
+PRODUCT_PACKAGES += su
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
+    ro.ridi.root_toggle=1 \
+    persist.sys.ridi.root_access=0
+ifeq ($(TARGET_BUILD_VARIANT),user)
+$(call inherit-product, device/ridi/e70q10/release.mk)
+else
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.secure=0 ro.adb.secure=0 ro.debuggable=1
 endif

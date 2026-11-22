@@ -1,0 +1,6 @@
+# BoardConfig.mk sets SF_START_GRAPHICS_ALLOCATOR_SERVICE := true, so
+# SurfaceFlinger registers the passthrough IAllocator (gralloc v1 HW_FB pages)
+# itself. Without this, user/enforcing boots stop at hwservicemanager
+# "denied { add } ... IAllocator" and SurfaceFlinger never comes up.
+# Same rule as AOSP device/linaro/hikey and device/asus/fugu.
+hal_server_domain(surfaceflinger, hal_graphics_allocator)

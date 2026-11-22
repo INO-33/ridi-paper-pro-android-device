@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Remove only replaced PAPER apps from the system image staging tree.
 
 Android O's package overrides do not delete old incremental install outputs.
 Run after replacement APK dependencies are installed, before listing/packing.
-Compatible with both the Android O Python 2 host and Python 3.
+Uses Python 3: old Python 2 zipfile rejects padding in modern signed APKs.
 """
 from __future__ import print_function
 

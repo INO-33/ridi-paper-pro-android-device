@@ -15,6 +15,7 @@ PRODUCT_PROPERTY_OVERRIDES += \
     ro.sf.lcd_density=320 \
     ro.config.low_ram=true \
     ro.ridi.disable_nav_animations=true \
+    ro.ridi.software_bitmaps=true \
     ro.paper.virtual_epdc=true \
     ro.ridi.epd.vsync_hz=15
 

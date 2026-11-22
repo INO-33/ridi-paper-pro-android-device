@@ -89,13 +89,19 @@ BOARD_SEPOLICY_DIRS := \
     device/fsl/imx6/sepolicy \
     device/ridi/e70q10/sepolicy
 
+ifeq ($(TARGET_BUILD_VARIANT),user)
+BOARD_SEPOLICY_M4DEFS += target_ridi_user_root=true
+endif
+
 # These images are not flashable to the stock 6 MiB boot / 384 MiB system
 # partitions. They are inputs for fastboot RAM boot and external-SD bring-up.
 
 # Applications are deliberately not dexpreopted at build time.
 #
-# build/make/core/dex_preopt.mk defaults WITH_DEXPREOPT_BOOT_IMG_ONLY to true on
-# eng builds, which is what this device wants. Clearing it does not buy anything:
+# Explicitly retain boot-image-only dexpreopt for user/userdebug as well as eng.
+# build/core/dex_preopt.mk supplies this default only for eng; relying on it
+# accidentally enables application dexpreopt when switching to a user build.
+# Clearing it does not buy anything:
 # the device runs dex2oat once, during the first boot after the image is
 # written, and caches the result in /data/dalvik-cache. Later boots reuse that
 # cache, so applications are not interpreted "on every boot". PackageManager
@@ -115,3 +121,5 @@ BOARD_SEPOLICY_DIRS := \
 # setarch -R does not help; it would need "sudo sysctl -w vm.mmap_rnd_bits=28"
 # on the build host. Not worth a host-wide change to ASLR entropy for work the
 # device already does once by itself.
+
+WITH_DEXPREOPT_BOOT_IMG_ONLY := true

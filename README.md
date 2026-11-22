@@ -47,7 +47,7 @@ waveform은 EPDC 초기화에 필요하고, `prebuilt/8189fs.ko`는 선택한 �
 [`docs/BRINGUP_HISTORY.md`](docs/BRINGUP_HISTORY.md)에 보존했습니다.
 그 문서에는 초기 단계의 상태와 과거 이미지 경로도 포함됩니다.
 
-현재 체크포인트는 2026-10-27입니다. 최종 저전압 종료 화면 등 실기기에서
+현재 체크포인트는 2026-11-22입니다. 최종 저전압 종료 화면 등 실기기에서
 계속 확인할 항목이 있으며, 소스 업로드가 모든 기능 검증 완료를 의미하지는 않습니다.
 
 ## 개발환경과 공개 전 자산 검토
@@ -74,3 +74,9 @@ Rozha One 폰트는 Google Fonts 원본과 SHA256이 일치하며 OFL 고지를 
 [DEVICE_ASSETS.md](DEVICE_ASSETS.md)를 확인하세요. 타 기기 포팅에서는 기기 유래 자산을 제외합니다.
 기존 코드·드라이버·폰트의 오픈소스 라이선스는 그대로 유지합니다.
 과거 포팅 기록과 설명이 다를 경우 이 라이선스 문서와 메인 PUBLIC_ASSETS.md의 최신 검토를 기준으로 합니다.
+
+
+## WebView APK (checkpoint 2026-11-22)
+
+`webview/SystemWebView.apk` is larger than the 100 MB GitHub file limit and is not
+committed. See `webview/SYSTEM_WEBVIEW_APK.md` for its source and SHA-256.

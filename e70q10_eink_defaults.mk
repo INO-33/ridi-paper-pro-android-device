@@ -28,3 +28,9 @@ $(call inherit-product, frameworks/native/build/phone-xhdpi-1024-dalvik-heap.mk)
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.config.low_ram=true \
     ro.ridi.disable_nav_animations=true
+
+# The stock AGL/GLES1 path cannot allocate HWUI ES2 textures. Route bitmap
+# decode/copy requests to CPU storage; leave the opt-in Mesa experiment intact.
+ifneq ($(E70Q10_GRAPHICS_BACKEND),mesa)
+PRODUCT_PROPERTY_OVERRIDES += ro.ridi.software_bitmaps=true
+endif

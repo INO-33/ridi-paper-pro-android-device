@@ -27,6 +27,8 @@ export ANDROID_JACK_VM_ARGS="${ANDROID_JACK_VM_ARGS:--Dfile.encoding=UTF-8 -XX:+
 lunch_target="${E70Q10_LUNCH:-e70q10_minimal-eng}"
 product_name="${lunch_target%-*}"
 export OUT_DIR="${E70Q10_OUT_DIR:-$workspace/android-out/$product_name}"
+# Host ART tools must not fall back to the build computer's /data.
+export ANDROID_DATA="${ANDROID_DATA:-$OUT_DIR/.android-data}"
 
 cd "$source_tree"
 set +u
@@ -72,8 +74,48 @@ case "${1:-check}" in
             set -- "$@" vendorimage
             echo "Adding vendorimage: apply system.img and vendor.img together"
         fi
+        mkdir -p "$ANDROID_DATA"
+        product_out="$OUT_DIR/target/product/e70q10"
+        # Non-eng Android 8 shows "internal problem" when the system and vendor
+        # fingerprints differ (Build.isBuildConsistent). The fingerprint embeds
+        # the make start time and build.prop only regenerates when its deps
+        # change, so force both (and the ramdisk copy) in this one invocation.
+        if (( want_system )) && [[ "$TARGET_BUILD_VARIANT" != eng ]]; then
+            # system/build.prop is only a copy of this intermediate.
+            rm -f "$product_out/obj/ETC/system_build_prop_intermediates/build.prop" \
+                "$product_out/system/build.prop" "$product_out/vendor/build.prop"
+            for build_target in "$@"; do
+                [[ "$build_target" != bootimage ]] || rm -f "$product_out/root/default.prop"
+            done
+        fi
         echo "Building $* with -j$jobs into $OUT_DIR"
         make -j"$jobs" "$@"
+        if (( want_system )) && [[ "$TARGET_BUILD_VARIANT" != eng ]]; then
+            system_fp="$(sed -n 's/^ro\.build\.fingerprint=//p' "$product_out/system/build.prop")"
+            vendor_fp="$(sed -n 's/^ro\.vendor\.build\.fingerprint=//p' "$product_out/vendor/build.prop")"
+            if [[ -z "$system_fp" || "$system_fp" != "$vendor_fp" ]]; then
+                echo "Fingerprint mismatch: system '$system_fp' vendor '$vendor_fp'" >&2
+                exit 1
+            fi
+            echo "Fingerprint: $system_fp"
+        fi
+        if (( want_system )) && [[ "$lunch_target" == e70q10_reference-user || "$lunch_target" == e70q10_minimal-user ]]; then
+            product_out="$OUT_DIR/target/product/e70q10"
+            python3 "$workspace/porting/e70q10/emmc-tool/signing_policy.py" \
+                --product "$product_out" --source "$source_tree" \
+                --certificate-dir "${RIDI_RELEASE_KEY_DIR:-$HOME/.local/share/ridi8-signing/keys}" \
+                --image "$product_out/system.img" --out "$product_out/signing-policy.tsv"
+            # Key migration RAM image for this exact build (policy + boot security
+            # policy embedded). The updater runtime is pinned; see its README.
+            signing_runtime="${RIDI_SIGNING_RUNTIME:-$workspace/porting/e70q10/signing-runtime/runtime.zip}"
+            if [[ -f "$signing_runtime.sha256" ]]; then
+                (cd "$(dirname "$signing_runtime")" && sha256sum -c --quiet "$(basename "$signing_runtime").sha256")
+            fi
+            rm -f "$product_out/signing-migration.img" "$product_out/signing-migration.img.sha256"
+            python3 "$workspace/porting/e70q10/emmc-tool/signing_rescue.py" \
+                --folder "$product_out" --runtime "$signing_runtime" \
+                --output "$product_out/signing-migration.img"
+        fi
         ;;
     *)
         echo "Usage: $0 [check | build [make-target ...]]" >&2

@@ -1,0 +1,46 @@
+# Rules needed once user builds run SELinux enforcing. Every rule here answers
+# a denial captured from the device (ADB logcat, 2026-11-17); see
+# .orchestrator/logs/selinux_enforcing_20261117/RESULT.md.
+
+# Wi-Fi: init.E70Q10.rc insmods the RTL8189FTV vendor module, and the legacy
+# Wi-Fi HAL reads /proc/modules to see whether it is loaded.
+allow init self:capability sys_module;
+allow init vendor_file:system module_load;
+allow hal_wifi_default proc_modules:file r_file_perms;
+
+# Frontlight: Settings writes lm3630a brightness/color directly (init.E70Q10.rc
+# chowns them to system). Labelled in genfs_contexts.
+type sysfs_ridi_frontlight, fs_type, sysfs_type;
+allow { system_app system_server hal_light_default } sysfs_ridi_frontlight:dir r_dir_perms;
+allow { system_app system_server hal_light_default } sysfs_ridi_frontlight:file rw_file_perms;
+
+# Boot animation reads SurfaceFlinger configstore values.
+hal_client_domain(bootanim, hal_configstore)
+
+# One-shot shell services from init.E70Q10.rc (seclabel there).
+type ridi_wifi_prepare, domain;
+typeattribute ridi_wifi_prepare coredomain;
+domain_trans(init, shell_exec, ridi_wifi_prepare)
+allow ridi_wifi_prepare shell_exec:file rx_file_perms;
+allow ridi_wifi_prepare toolbox_exec:file rx_file_perms;
+allow ridi_wifi_prepare system_file:dir r_dir_perms;
+allow ridi_wifi_prepare system_file:file { rx_file_perms execute_no_trans };
+allow ridi_wifi_prepare system_file:lnk_file read;
+allow ridi_wifi_prepare system_data_file:dir search;
+allow ridi_wifi_prepare wifi_data_file:dir search;
+allow ridi_wifi_prepare wifi_data_file:file { getattr open read append write setattr };
+allow ridi_wifi_prepare self:capability { chown fowner dac_override };
+
+type ridi_eink_defaults, domain;
+typeattribute ridi_eink_defaults coredomain;
+domain_trans(init, shell_exec, ridi_eink_defaults)
+allow ridi_eink_defaults shell_exec:file rx_file_perms;
+allow ridi_eink_defaults system_file:dir r_dir_perms;
+allow ridi_eink_defaults system_file:file { rx_file_perms execute_no_trans };
+allow ridi_eink_defaults system_file:lnk_file read;
+binder_use(ridi_eink_defaults)
+binder_call(ridi_eink_defaults, system_server)
+binder_call(system_server, ridi_eink_defaults)
+allow ridi_eink_defaults settings_service:service_manager find;
+allow system_server ridi_eink_defaults:fd use;
+

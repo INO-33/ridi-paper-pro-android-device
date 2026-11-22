@@ -1,7 +1,8 @@
 # Only these two existing kernel statistic files are readable by the recorder.
-genfscon debugfs /wakeup_sources u:object_r:ridi_power_diag_debugfs:s0
-genfscon debugfs /suspend_stats u:object_r:ridi_power_diag_debugfs:s0
 
 # The GPIO LED node and its class links are used only by the lights HAL.
 genfscon sysfs /devices/platform/ridi-status-leds u:object_r:sysfs_leds:s0
 genfscon sysfs /class/leds u:object_r:sysfs_leds:s0
+
+# lm3630a frontlight (brightness/color) written by Settings and system_server.
+genfscon sysfs /devices/soc0/soc/2100000.aips-bus/21a4000.i2c/i2c-0/0-0038/backlight u:object_r:sysfs_ridi_frontlight:s0

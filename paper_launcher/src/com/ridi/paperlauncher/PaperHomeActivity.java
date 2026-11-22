@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -25,6 +26,7 @@ import android.os.Bundle;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.format.DateFormat;
+import android.util.DisplayMetrics;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
@@ -177,6 +179,24 @@ public final class PaperHomeActivity extends Activity {
             movePaint.setStrokeWidth(3f);
         }
 
+        /** Icons are drawn at ~175 px; the 300 dpi default resolves ~90 px art and
+         *  upscales it. Load the highest-density art and only ever scale down. */
+        private Drawable loadSharpIcon(PackageManager pm, ResolveInfo info) {
+            final int iconRes = info.getIconResource();
+            if (iconRes != 0 && info.activityInfo != null) {
+                try {
+                    Resources res = pm.getResourcesForApplication(
+                            info.activityInfo.applicationInfo);
+                    Drawable icon = res.getDrawableForDensity(iconRes,
+                            DisplayMetrics.DENSITY_XXXHIGH, null);
+                    if (icon != null) return icon;
+                } catch (PackageManager.NameNotFoundException | Resources.NotFoundException e) {
+                    // Fall back to the package manager's default icon below.
+                }
+            }
+            return info.loadIcon(pm);
+        }
+
         void loadApps() {
             PackageManager pm = getPackageManager();
             Intent query = new Intent(Intent.ACTION_MAIN);
@@ -189,7 +209,7 @@ public final class PaperHomeActivity extends Activity {
             for (ResolveInfo info : found) {
                 if (info.activityInfo == null
                         || getPackageName().equals(info.activityInfo.packageName)) continue;
-                App app = new App(info.loadLabel(pm), info.loadIcon(pm),
+                App app = new App(info.loadLabel(pm), loadSharpIcon(pm, info),
                         new ComponentName(info.activityInfo.packageName, info.activityInfo.name));
                 (hiddenNames.contains(app.component.flattenToString()) ? hidden : updated).add(app);
             }
@@ -287,23 +307,38 @@ public final class PaperHomeActivity extends Activity {
                 float x = centersX[slot % 5];
                 float y = shelfY[slot / 5];
                 drawAppIcon(canvas, app, x, y);
-                CharSequence label = TextUtils.ellipsize(app.label, textPaint, 176f,
-                        TextUtils.TruncateAt.END);
-                canvas.drawText(label.toString(), x, y - 9f, textPaint);
-            }
-            if (movingApp != null) {
-                textPaint.setTextSize(21f);
-                canvas.drawText("옮길 위치를 누르세요 · 뒤로: 취소", IMAGE_WIDTH / 2f,
-                        1380f, textPaint);
-                textPaint.setTextSize(23f);
-            }
-            if (maxPage() > 0) {
-                textPaint.setTextSize(21f);
-                canvas.drawText((page + 1) + " / " + (maxPage() + 1),
-                        IMAGE_WIDTH / 2f, 1410f, textPaint);
-                textPaint.setTextSize(23f);
             }
             canvas.restoreToCount(save);
+            drawTexts(canvas);
+        }
+
+        /** Text is laid out in screen pixels with a uniform size, not through the
+         *  non-uniform shelf scale, so glyphs stay hinted and unstretched. */
+        private void drawTexts(Canvas canvas) {
+            final float scaleX = getWidth() / IMAGE_WIDTH;
+            final float scaleY = getHeight() / IMAGE_HEIGHT;
+            final float scale = Math.min(scaleX, scaleY);
+            textPaint.setTextSize(23f * scale);
+            for (int slot = 0; slot < PAGE_SIZE; slot++) {
+                int index = page * PAGE_SIZE + slot;
+                if (index >= apps.size()) break;
+                App app = apps.get(index);
+                if (app == null) continue;
+                CharSequence label = TextUtils.ellipsize(app.label, textPaint, 176f * scale,
+                        TextUtils.TruncateAt.END);
+                canvas.drawText(label.toString(), Math.round(centersX[slot % 5] * scaleX),
+                        Math.round((shelfY[slot / 5] - 9f) * scaleY), textPaint);
+            }
+            textPaint.setTextSize(21f * scale);
+            if (movingApp != null) {
+                canvas.drawText("옮길 위치를 누르세요 · 뒤로: 취소", getWidth() / 2f,
+                        Math.round(1380f * scaleY), textPaint);
+            }
+            if (maxPage() > 0) {
+                canvas.drawText((page + 1) + " / " + (maxPage() + 1), getWidth() / 2f,
+                        Math.round(1410f * scaleY), textPaint);
+            }
+            textPaint.setTextSize(23f * scale);
         }
 
         private void drawFlapClock(Canvas canvas) {

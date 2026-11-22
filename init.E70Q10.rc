@@ -1,6 +1,9 @@
 import /init.freescale.usb.rc
 
 on early-init
+    mkdir /dev/ridi-root 0755 root root
+    # Limit synchronous UART output while retaining messages in dmesg.
+    write /proc/sys/kernel/printk "4 4 1 7"
     write /proc/sys/kernel/panic 10
     mount debugfs debugfs /sys/kernel/debug mode=0755
     wait /dev/block/mmcblk1p1
@@ -32,10 +35,6 @@ on post-fs
     setprop wlan.driver.status ok
 
 on post-fs-data
-    mkdir /data/ridi 0770 system system
-    mkdir /data/ridi/logs 0770 system system
-    mkdir /data/ridi/logs/power-diag 0700 root root
-    restorecon_recursive /data/ridi/logs/power-diag
     start e70q10_wifi_prepare
 
 on boot
@@ -90,26 +89,11 @@ on boot
 on property:sys.boot_completed=1
     start e70q10_eink_defaults
 
-# Optional suspend/battery recorder. Enable with
-# setprop sys.ridi.power_diag 1; stop with ... 0.
-# It has no wake lock and does not request RTC wakeups.
-on property:sys.ridi.power_diag=1
-    start e70q10_power_diag
-
-on property:sys.ridi.power_diag=0
-    stop e70q10_power_diag
-
-service e70q10_power_diag /system/bin/e70q10_power_diag
-    class late_start
-    user root
-    group system
-    disabled
-    oneshot
-
-service e70q10_eink_defaults /system/bin/e70q10-eink-settings
+service e70q10_eink_defaults /system/bin/sh /system/bin/e70q10-eink-settings
     class late_start
     user system
     group system
+    seclabel u:r:ridi_eink_defaults:s0
     disabled
     oneshot
 
@@ -120,6 +104,7 @@ service e70q10_wifi_prepare /system/bin/sh /system/bin/e70q10-wifi-prepare
     class core
     user root
     group root wifi
+    seclabel u:r:ridi_wifi_prepare:s0
     disabled
     oneshot
 
@@ -143,3 +128,23 @@ service watchdogd /sbin/watchdogd 10 20
     user root
     group root
     seclabel u:r:watchdogd:s0
+
+# Root availability is independent of USB debugging. /system stays read-only.
+on property:persist.sys.ridi.root_access=1
+    symlink /system/xbin/ridi-su /dev/ridi-root/su
+    restorecon /dev/ridi-root/su
+    setprop service.adb.root 1
+    setprop sys.ridi.root_restart_adb 1
+
+on property:persist.sys.ridi.root_access=0
+    rm /dev/ridi-root/su
+    setprop service.adb.root 0
+    setprop sys.ridi.root_restart_adb 1
+
+# Consume before restarting, so init.svc.adbd=running cannot trigger a loop.
+on property:sys.ridi.root_restart_adb=1 && property:init.svc.adbd=running
+    setprop sys.ridi.root_restart_adb 0
+    restart adbd
+
+on property:sys.ridi.root_restart_adb=1 && property:init.svc.adbd=stopped
+    setprop sys.ridi.root_restart_adb 0

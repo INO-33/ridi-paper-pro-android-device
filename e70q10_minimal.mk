@@ -38,12 +38,20 @@ PRODUCT_COPY_FILES += \
     frameworks/native/data/etc/android.hardware.screen.portrait.xml:system/etc/permissions/android.hardware.screen.portrait.xml
 
 PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
-    ro.secure=0 \
-    ro.adb.secure=0 \
-    ro.debuggable=1 \
     persist.sys.usb.config=adb
 
 PRODUCT_PROPERTY_OVERRIDES += \
     ro.sf.lcd_density=300 \
     ro.opengles.version=131072 \
     debug.sf.nobootanimation=1
+
+# Optional root is independent of Android's global debug properties.
+PRODUCT_PACKAGES += su
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += \
+    ro.ridi.root_toggle=1 \
+    persist.sys.ridi.root_access=0
+ifeq ($(TARGET_BUILD_VARIANT),user)
+$(call inherit-product, device/ridi/e70q10/release.mk)
+else
+PRODUCT_DEFAULT_PROPERTY_OVERRIDES += ro.secure=0 ro.adb.secure=0 ro.debuggable=1
+endif

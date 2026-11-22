@@ -46,9 +46,9 @@ boot image under current kernel ASLR), so no application odex is produced.
 ls -l $OUT/system.img          # expect ~439 MB, partition limit is 768 MB
 ```
 
-A noticeably larger image means something re-enabled build-time dexpreopt. Check
-that neither `WITH_DEXPREOPT_BOOT_IMG_ONLY` nor `PRODUCT_DEXPREOPT_SPEED_APPS` has
-crept back in:
+A noticeably larger image can mean application dexpreopt was re-enabled. Check
+that `WITH_DEXPREOPT_BOOT_IMG_ONLY := true` remains set in `BoardConfig.mk` for
+all build variants, and that no `PRODUCT_DEXPREOPT_SPEED_APPS` override was added:
 
 ```bash
 grep -rn "WITH_DEXPREOPT_BOOT_IMG_ONLY\|PRODUCT_DEXPREOPT_SPEED_APPS" \
